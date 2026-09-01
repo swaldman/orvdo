@@ -3,6 +3,7 @@ package com.mchange.orvdo
 import cats.data.Validated
 import cats.syntax.all.*
 import com.monovore.decline.{Argument, Command, Opts}
+import exception.AwaitVideoTimeout
 import java.security.MessageDigest
 import java.time.{Instant, ZoneOffset}
 import java.time.format.DateTimeFormatter
@@ -642,6 +643,21 @@ object Main extends ZIOAppDefault:
           )
         )
 
+  /** A timeout is the most recoverable failure this tool produces: the job is
+    * almost certainly still rendering, OpenRouter still has it, and the id is
+    * right there in the exception. Saying only that we gave up waiting would
+    * leave the user to work that out. Every other failure gets the plain line. */
+  private def reportFailure(e: Throwable): UIO[ExitCode] =
+    val lines = e match
+      case t: AwaitVideoTimeout =>
+        List(
+          s"error: ${t.getMessage}",
+          "       the job is probably still rendering; pick it up again with",
+          s"       check --job-id ${t.jobId} --await --download-as <path>"
+        )
+      case other => List(s"error: ${other.getMessage}")
+    ZIO.foreachDiscard(lines)(Console.printLineError(_).ignore).as(ExitCode.failure)
+
   private def progress(line: String): UIO[Unit] =
     Console.printLineError(line).ignore
 
@@ -655,9 +671,7 @@ object Main extends ZIOAppDefault:
         case Left(help) =>
           Console.printLineError(help.toString).ignore.as(ExitCode.failure)
         case Right(cmd) =>
-          runCmd(cmd).as(ExitCode.success).catchAll { e =>
-            Console.printLineError(s"error: ${e.getMessage}").ignore.as(ExitCode.failure)
-          }
+          runCmd(cmd).as(ExitCode.success).catchAll(reportFailure)
       // ZIO derives the process exit code from whether `run` *failed*, not from
       // the value it returns, so a returned ExitCode is otherwise silently
       // dropped and every error path exits 0. Failing instead would set the

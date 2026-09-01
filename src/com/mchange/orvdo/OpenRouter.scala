@@ -1,5 +1,7 @@
 package com.mchange.orvdo
 
+import exception.*
+
 import zio.*
 
 /** Every operation is a `Task` that takes the API key explicitly, so nothing is
@@ -25,12 +27,6 @@ object OpenRouter:
   private [orvdo] trait JsonWrapper[T[_]]:
     def wrap[A](a : A, json : ujson.Value) : T[A]
     def value[A](ta : T[A]) : A
-
-  final case class ApiError(status: Int, body: String)
-      extends RuntimeException(s"OpenRouter returned HTTP $status: ${body.take(500)}")
-
-  final case class TargetExists(path: os.Path)
-      extends RuntimeException(s"$path already exists; pass --force to overwrite it")
 
   private def jsonHeaders(apiKey: String): Map[String, String] =
     Map("Authorization" -> s"Bearer $apiKey", "Content-Type" -> "application/json")
@@ -114,9 +110,7 @@ object OpenRouter:
       _check[T](apiKey, jobId)
         .tap(r => onPoll(jw.value(r)))
         .repeat(untilTerminal)
-        .timeoutFail(
-          new RuntimeException(s"job $jobId did not finish within ${timeout.render}")
-        )(timeout)
+        .timeoutFail( AwaitVideoTimeout(jobId, timeout) )(timeout)
 
   /** GET /videos/models — capabilities and pricing for every video model.
     *
