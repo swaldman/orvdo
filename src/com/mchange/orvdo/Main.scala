@@ -398,7 +398,7 @@ object Main extends ZIOAppDefault:
     * catalog lists nothing for is passed through untouched: an empty list means
     * the catalog has nothing to say, not that nothing is allowed. All the
     * problems are reported at once rather than one per run. */
-  private def canonical(s: Cmd.Submit, m: VideoModel): Task[Cmd.Submit] =
+  private[orvdo] def canonical(s: Cmd.Submit, m: VideoModel): Task[Cmd.Submit] =
     def matched[A](flag: String, supplied: Option[A], offered: List[A])(
         eq: (A, A) => Boolean
     ): Either[String, Option[A]] =
@@ -474,7 +474,7 @@ object Main extends ZIOAppDefault:
     * cheapest value the model offers, and report each one we picked. Anything
     * the user set explicitly is left alone and goes unreported — the warning is
     * about choices made on their behalf, not choices they made. */
-  private def cheapest(s: Cmd.Submit, prompt: String, m: VideoModel): (VideoRequest, List[Chosen]) =
+  private[orvdo] def cheapest(s: Cmd.Submit, prompt: String, m: VideoModel): (VideoRequest, List[Chosen]) =
     val chosen = List.newBuilder[Chosen]
 
     def pick[A](supplied: Option[A], cheap: Option[A], field: String, offered: List[String])(

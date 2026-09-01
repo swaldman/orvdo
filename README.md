@@ -16,6 +16,12 @@ Mill, with the wrapper checked in — no global install needed:
 ./mill publishMchange                 # into the mchange staging repository
 ```
 
+Tests are utest, and hermetic — no API key, no network:
+
+```
+./mill test
+```
+
 `./mill run` is convenient while developing, but it decorates any non-zero exit
 with a `Subprocess failed` line of its own. For actual use, `./mill assembly`
 writes a launcher to `out/assembly.dest/out.jar` that runs directly and exits

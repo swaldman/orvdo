@@ -1,0 +1,105 @@
+package com.mchange.orvdo
+
+import utest.*
+import TestSupport.*
+
+object RenderTests extends TestSuite:
+
+  def job(n: Int, status: String = "completed") = upickle.default.read[VideoJob](
+    s"""{"id":"JOB123","status":"$status","usage":{"cost":0.16},
+        |"unsigned_urls":[${(0 until n).map(i =>
+             s""""https://openrouter.ai/api/v1/videos/JOB123/content?index=$i"""").mkString(",")}]}""".stripMargin)
+
+  val tests = Tests:
+
+    test("one video renders as Video, several as Video[n]"):
+      assert(Render.job(job(1)).contains("Video      "))
+      val many = Render.job(job(3))
+      assert(many.contains("Video[0]") && many.contains("Video[2]"))
+
+    test("a completed job with no content URL says so"):
+      assert(Render.job(job(0)).contains("completed but reported no content URLs"))
+
+    test("a label at or past the column width still separates from its value"):
+      // Passthrough keys are the real long labels -- `return_last_frame` is 17
+      // characters against a 12-column gutter. Without the guard in `row` the
+      // value runs straight into the key: `return_last_frametrue`.
+      val out = Render.passthrough(List("seed"), List(Param("return_last_frame", ujson.Bool(true))), Nil)
+      assert(out.contains("return_last_frame true"))
+
+    test("a shorter label is padded to the gutter"):
+      assert(Render.job(job(11)).contains("Video[10]   http"))
+
+    test("the multi-video warning names what was skipped"):
+      val w = Render.unsaved(job(3), os.Path("/tmp/clips/duck.mp4"))
+      assert(w.contains("returned 3 videos") && w.contains("only index 0"))
+
+    test("and emits a runnable curl per unsaved URL, not a bare list"):
+      // Content URLs still need the bearer token, so a bare URL is a 401.
+      val w = Render.unsaved(job(3), os.Path("/tmp/clips/duck.mp4"))
+      val curls = w.linesIterator.filter(_.trim.startsWith("curl")).toList
+      assert(curls.size == 2)
+      assert(curls.forall(_.contains("Authorization: Bearer")))
+      assert(curls.head.contains("index=1") && curls(1).contains("index=2"))
+
+    test("the key stays a shell variable, never interpolated"):
+      val w = Render.unsaved(job(2), os.Path("/tmp/duck.mp4"))
+      assert(w.contains("$OPENROUTER_API_KEY") && !w.contains("sk-or"))
+
+    test("target names are siblings of the saved file"):
+      val w = Render.unsaved(job(3), os.Path("/tmp/clips/duck.mp4"))
+      assert(w.contains("/tmp/clips/duck-1.mp4") && w.contains("/tmp/clips/duck-2.mp4"))
+
+    test("an extensionless target still gets sensible names"):
+      assert(Render.unsaved(job(2), os.Path("/tmp/duck")).contains("/tmp/duck-1\""))
+
+    test("paths and URLs are quoted, so spaces and queries survive a paste"):
+      val w = Render.unsaved(job(2), os.Path("/tmp/my clip.mp4"))
+      assert(w.contains("\"/tmp/my clip-1.mp4\""))
+      assert(w.contains("\"https://openrouter.ai/api/v1/videos/JOB123/content?index=1\""))
+
+    test("the defaults warning lists the picks and the alternatives"):
+      val w = Render.defaults("google/veo-3.1", List(
+        Chosen("duration", "4 s", List("4", "6", "8")),
+        Chosen("audio", "off", List("on", "off"))))
+      assert(w.contains("cheapest google/veo-3.1"))
+      assert(w.contains("duration") && w.contains("(of 4, 6, 8)"))
+
+    test("the drift warning names the scope and the fields"):
+      val w = Render.unmodeled("VideoModel", List("creativity", "upscale_factor"))
+      assert(w.contains("VideoModel") && w.contains("creativity, upscale_factor"))
+
+    test("a receipt leads with the model and closes with the digest"):
+      val r = Render.receipt(Some(veo), job(1),
+        Some(os.Path("/tmp/duck.mp4") -> "abc123"), Some("a duck in a hat"))
+      val lines = r.linesIterator.toList
+      assert(lines.head.startsWith("Model") && lines.head.contains("google/veo-3.1"))
+      assert(lines(1).contains("Google: Veo 3.1") && lines(2).contains("veo-3.1-20260320"))
+      assert(r.contains("SHA-256") && r.contains("abc123"))
+      assert(r.endsWith("Prompt:\na duck in a hat"))
+
+    test("a receipt without a download has no Saved or digest rows"):
+      val r = Render.receipt(Some(veo), job(1), None, None)
+      assert(!r.contains("SHA-256") && !r.contains("Saved") && !r.contains("Prompt:"))
+
+    test("the catalog block suppresses the job's own duplicate Model row"):
+      val withModel = job(1).copy(model = Some("google/veo-3.1"))
+      val r = Render.receipt(Some(veo), withModel, None, None)
+      assert(r.linesIterator.count(_.startsWith("Model")) == 1)
+
+    test("with no catalog entry the job's own model row is kept"):
+      val withModel = job(1).copy(model = Some("google/veo-3.1"))
+      assert(Render.receipt(None, withModel, None, None).contains("Model"))
+
+    test("list-models distinguishes empty from filtered-to-empty"):
+      assert(Render.models(Nil, None).contains("No video generation models available"))
+      assert(Render.models(Nil, Some("zzz")).contains("match 'zzz'"))
+
+    test("a model block omits fields the catalog left null"):
+      val block = Render.models(List(aleph), None)
+      assert(block.contains("runway/aleph-2"))
+      assert(!block.contains("durations") && !block.contains("resolutions"))
+
+    test("capability booleans render as yes/no"):
+      val block = Render.models(List(veo), None)
+      assert(block.contains("audio       yes") && block.contains("seed        yes"))

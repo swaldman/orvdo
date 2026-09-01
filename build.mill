@@ -38,6 +38,10 @@ object `package` extends ScalaModule, SonatypeCentralPublishModule:
       )
     )
 
+  object test extends ScalaTests, TestModule.Utest:
+    override def mvnDeps = Task:
+      super.mvnDeps() ++ Seq( mvn"com.lihaoyi::utest:0.8.5" )
+
   val MchangeStaging = "/Users/swaldman/development/gitproj/www.mchange.com/repository"
 
   def publishMchange() = this.publishM2Local( MchangeStaging )
