@@ -1,4 +1,4 @@
-package orvdo
+package com.mchange.orvdo
 
 import scala.compiletime.constValueTuple
 import scala.deriving.Mirror

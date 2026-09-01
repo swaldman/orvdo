@@ -1,4 +1,4 @@
-package orvdo
+package com.mchange.orvdo
 
 import cats.data.Validated
 import cats.syntax.all.*
