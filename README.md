@@ -198,6 +198,44 @@ download URL, are printed first either way.
 Progress lines go to stderr; job records and model listings go to stdout, so
 `scala-cli run . -- check --job-id abc123 > job.txt` captures just the record.
 
+## Receipts
+
+How a video was made is easy to lose once the shell scrollback is gone.
+`--receipt` writes it down:
+
+```
+scala-cli run . -- submit -m google/veo-3.1 -p prompt.txt \
+  --await --download-as out/clip.mp4 --receipt
+```
+
+```
+Model       google/veo-3.1
+Name        Google: Veo 3.1
+Slug        google/veo-3.1-20260320
+Job         B7pFInVvvptLkVDxixee
+Status      completed
+Generation  gen-vid-1788201304
+Cost        $0.0543
+Video       https://openrouter.ai/api/v1/videos/B7pFInVvvptLkVDxixee/content?index=0
+Saved       /Users/you/out/clip.mp4
+SHA-256     549d4d549a83f3ee8d06b9da72bcce6686cfdbd4213f337ac04699a88ae8e071
+
+Prompt:
+a duck wearing a tiny hat
+```
+
+The digest lets a file be checked against the record later, and the prompt is
+the part nothing else remembers.
+
+Where it lands, unless `--receipt-as path` says otherwise: beside the video as
+`<download-as>.receipt` when one was saved, so the pair travels together;
+otherwise `<model-id>-<job-id>-<timestamp>.receipt` in the working directory,
+with slashes in the model id replaced so it stays one filename.
+
+`check --receipt` works too, but a receipt written there has no model block and
+no prompt — a job id says nothing about how it was asked for. `submit` without
+`--await` still writes one, recording the model and prompt while they are known.
+
 ## Seeing the whole response
 
 `submit` and `check` take `--json`, which prints the response OpenRouter

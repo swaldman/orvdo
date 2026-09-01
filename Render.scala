@@ -70,6 +70,44 @@ object Render:
   /** Aligned with the job rows above it, since it is printed just beneath them. */
   def saved(path: os.Path): String = row("Saved", path.toString)
 
+  def receiptAt(path: os.Path): String = row("Receipt", path.toString)
+
+  /** A standalone record of how a video came to exist, meant to outlive the
+    * shell that made it.
+    *
+    * The model block leads because that is what a file on disk cannot tell you
+    * later; the digest closes the key/value section so the record can be
+    * checked against the file it describes; the prompt goes last and free-form,
+    * since it is the only part that is prose and may run to many lines.
+    */
+  def receipt(
+      model: Option[VideoModel],
+      j: VideoJob,
+      saved: Option[(os.Path, String)],
+      prompt: Option[String]
+  ): String =
+    val out = List.newBuilder[String]
+
+    model.foreach { m =>
+      out += row("Model", m.id)
+      m.name.foreach(n => out += row("Name", n))
+      m.canonical_slug.foreach(sl => out += row("Slug", sl))
+    }
+
+    // The catalog block above already names the model, so the job's own copy
+    // would only repeat it. Dropped here rather than by a flag on `job`, which
+    // keeps that function's contract simple.
+    out += job(if model.isDefined then j.copy(model = None) else j)
+
+    saved.foreach { (path, digest) =>
+      out += row("Saved", path.toString)
+      out += row("SHA-256", digest)
+    }
+
+    prompt.foreach(p => out += s"\nPrompt:\n$p")
+
+    out.result().mkString("\n")
+
   /** Everything we know about a job, including where to fetch the video. */
   def job(j: VideoJob): String =
     val out = List.newBuilder[String]

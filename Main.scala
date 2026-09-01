@@ -3,7 +3,31 @@ package orvideo
 import cats.data.Validated
 import cats.syntax.all.*
 import com.monovore.decline.{Argument, Command, Opts}
+import java.security.MessageDigest
+import java.time.{Instant, ZoneOffset}
+import java.time.format.DateTimeFormatter
 import zio.*
+
+/** Whether to write a receipt, and where. Three states rather than an
+  * `Option[Option[os.Path]]`, because "no receipt" and "a receipt somewhere I
+  * did not name" are different requests and should read as different. */
+enum ReceiptTo:
+  case No
+  case Derived
+  case At(path: os.Path)
+
+/** The output-side options, which `submit` and `check` share entirely. Bundled
+  * so the function that acts on them takes four arguments rather than eight. */
+final case class Output(
+    downloadAs: Option[os.Path],
+    force: Boolean,
+    json: Boolean,
+    receipt: ReceiptTo
+)
+
+/** What a receipt records beyond the job itself. Only the `submit` path knows
+  * either: `check` is handed a job id and nothing about how it was asked for. */
+final case class Provenance(model: Option[VideoModel] = None, prompt: Option[String] = None)
 
 enum Cmd:
   case ListModels(apiKey: String, filter: Option[String])
@@ -13,7 +37,8 @@ enum Cmd:
       await: Boolean,
       downloadAs: Option[os.Path],
       force: Boolean,
-      json: Boolean
+      json: Boolean,
+      receipt: ReceiptTo
   )
   case Submit(
       apiKey: String,
@@ -30,6 +55,7 @@ enum Cmd:
       downloadAs: Option[os.Path],
       force: Boolean,
       json: Boolean,
+      receipt: ReceiptTo,
       params: List[Param]
   )
 
@@ -107,6 +133,27 @@ object Cli:
   private val force: Opts[Boolean] =
     Opts.flag("force", "Overwrite the --download-as target if it already exists.").orFalse
 
+  /** `--receipt` alone derives a path; `--receipt-as` names one and implies the
+    * former, so there is no way to ask for a receipt location without a
+    * receipt. */
+  private val receipt: Opts[ReceiptTo] =
+    (
+      Opts
+        .flag("receipt", "Write a receipt recording how this video was made.")
+        .orFalse,
+      Opts
+        .option[os.Path](
+          "receipt-as",
+          "Write the receipt to this path. Implies --receipt.",
+          metavar = "path"
+        )
+        .orNone
+    ).mapN {
+      case (_, Some(path)) => ReceiptTo.At(path)
+      case (true, None)    => ReceiptTo.Derived
+      case (false, None)   => ReceiptTo.No
+    }
+
   private val json: Opts[Boolean] =
     Opts
       .flag(
@@ -142,7 +189,8 @@ object Cli:
       await,
       downloadAs("Write this job's video to this path."),
       force,
-      json
+      json,
+      receipt
     ).mapN(Cmd.Check.apply)
 
   private val check: Opts[Cmd] =
@@ -218,6 +266,7 @@ object Cli:
       downloadAs("Write the finished video to this path. Requires --await."),
       force,
       json,
+      receipt,
       params
     ).mapN(Cmd.Submit.apply)
 
@@ -260,7 +309,14 @@ object Main extends ZIOAppDefault:
           if c.await && !job.value.isTerminal then
             awaitTerminal(c.apiKey, job, s"job ${job.value.id} is ${job.value.status}, waiting...")
           else ZIO.succeed(job)
-        _ <- reportAndDownload(c.apiKey, c.downloadAs, c.force, finished, c.json)
+        // `check` knows the job and nothing about how it was asked for, so a
+        // receipt written here has no model block and no prompt.
+        _ <- reportAndDownload(
+          c.apiKey,
+          Output(c.downloadAs, c.force, c.json, c.receipt),
+          finished,
+          Provenance()
+        )
       yield ()
 
     case s: Cmd.Submit =>
@@ -274,9 +330,15 @@ object Main extends ZIOAppDefault:
         _ <- ZIO.when(chosen.nonEmpty)(progress(Render.defaults(s.model, chosen)))
         provider <- passthroughFor(s, model)
         job <- OpenRouter.submit(s.apiKey, request, provider)
+        provenance = Provenance(Some(model), Some(prompt))
+        out = Output(s.downloadAs, s.force, s.json, s.receipt)
         _ <-
-          if !s.await then printJob(job, s.json)
-          else awaitAndMaybeDownload(s, job)
+          // Without --await there is nothing to download, so this reduces to
+          // printing the record and writing the receipt. Worth doing anyway:
+          // the model and prompt are known only here, and a later `check`
+          // could never recover them.
+          if !s.await then reportAndDownload(s.apiKey, out, job, provenance)
+          else awaitAndMaybeDownload(s, out, job, provenance)
       yield ()
 
   /** `--json` prints the bytes OpenRouter actually sent. It deliberately does
@@ -462,10 +524,15 @@ object Main extends ZIOAppDefault:
 
   /** Poll to a terminal state, then attempt the download if one was asked for.
     * The full job information is printed either way, download or no download. */
-  private def awaitAndMaybeDownload(s: Cmd.Submit, job: Raw[VideoJob]): Task[Unit] =
+  private def awaitAndMaybeDownload(
+      s: Cmd.Submit,
+      out: Output,
+      job: Raw[VideoJob],
+      provenance: Provenance
+  ): Task[Unit] =
     for
       finished <- awaitTerminal(s.apiKey, job, s"submitted ${job.value.id}, waiting for completion...")
-      _ <- reportAndDownload(s.apiKey, s.downloadAs, s.force, finished, s.json)
+      _ <- reportAndDownload(s.apiKey, out, finished, provenance)
     yield ()
 
   /** Poll to a terminal state, narrating each status on stderr. Shared so that
@@ -482,19 +549,81 @@ object Main extends ZIOAppDefault:
     * `submit --await` and `check`, which differ only in how they got the job. */
   private def reportAndDownload(
       apiKey: String,
-      target: Option[os.Path],
-      force: Boolean,
+      out: Output,
       job: Raw[VideoJob],
-      json: Boolean
+      provenance: Provenance
   ): Task[Unit] =
     for
-      attempted <- downloadFor(apiKey, target, force, job.value).either
-      _ <- printJob(job, json)
+      attempted <- downloadFor(apiKey, out.downloadAs, out.force, job.value).either
+      _ <- printJob(job, out.json)
       _ <- attempted match
         case Right(Some(path)) => Console.printLine(Render.saved(path))
         case _                 => ZIO.unit
+      // A receipt is written whether or not the download worked, and records
+      // the digest only when there is a file to digest. Its own failure is
+      // captured for the same reason the download's is: the record has been
+      // printed by now and must not be retracted.
+      wrote <- writeReceipt(out, job.value, attempted.toOption.flatten, provenance).either
+      _ <- wrote match
+        case Right(Some(path)) => Console.printLine(Render.receiptAt(path))
+        case _                 => ZIO.unit
       _ <- ZIO.fromEither(attempted).unit
+      _ <- ZIO.fromEither(wrote).unit
     yield ()
+
+  private[orvideo] def writeReceipt(
+      out: Output,
+      job: VideoJob,
+      downloaded: Option[os.Path],
+      provenance: Provenance
+  ): Task[Option[os.Path]] =
+    if out.receipt == ReceiptTo.No then ZIO.none
+    else
+      for
+        digest <- ZIO.foreach(downloaded)(p => sha256(p).map(p -> _))
+        path = receiptPath(out, job, provenance.model.map(_.id).orElse(job.model))
+        _ <- ZIO.attemptBlocking {
+          os.makeDir.all(path / os.up)
+          os.write.over(path, Render.receipt(provenance.model, job, digest, provenance.prompt) + "\n")
+        }
+      yield Some(path)
+
+  /** Beside the video when there is one, so the pair travels together; named
+    * for the model and job otherwise, so it is identifiable alone. A model id
+    * carries a slash, which would read as a directory, hence the substitution.
+    */
+  private[orvideo] def receiptPath(out: Output, job: VideoJob, modelId: Option[String]): os.Path =
+    out.receipt match
+      case ReceiptTo.At(path) => path
+      case _ =>
+        out.downloadAs match
+          case Some(video) => video / os.up / s"${video.last}.receipt"
+          case None =>
+            val slug = modelId.getOrElse("video").replace('/', '-')
+            os.pwd / s"$slug-${job.id}-${timestamp()}.receipt"
+
+  private def timestamp(): String =
+    DateTimeFormatter
+      .ofPattern("yyyyMMdd'T'HHmmss'Z'")
+      .withZone(ZoneOffset.UTC)
+      .format(Instant.now)
+
+  /** Streamed rather than read whole: a 4K clip runs to hundreds of megabytes,
+    * and the digest is the one part of a receipt that should not itself be a
+    * reason to run out of memory. */
+  private[orvideo] def sha256(path: os.Path): Task[String] =
+    ZIO.attemptBlocking {
+      val digest = MessageDigest.getInstance("SHA-256")
+      val buffer = new Array[Byte](64 * 1024)
+      val in = os.read.inputStream(path)
+      try
+        var n = in.read(buffer)
+        while n >= 0 do
+          if n > 0 then digest.update(buffer, 0, n)
+          n = in.read(buffer)
+      finally in.close()
+      digest.digest().map(b => f"${b & 0xff}%02x").mkString
+    }
 
   private def downloadFor(
       apiKey: String,
