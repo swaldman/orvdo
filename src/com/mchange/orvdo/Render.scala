@@ -78,21 +78,20 @@ object Render:
     saved / os.up / s"${saved.baseName}-$index$suffix"
 
   /** The content URLs `--download-as` had no name for, with a command that
-    * fetches them.
+    * fetches each.
     *
-    * A bare list would not be much use. Content URLs are "unsigned" only in
-    * that they carry no signature of their own — they still require the bearer
-    * token, so pasting one into a browser earns a 401. The key is emitted as a
-    * shell variable rather than interpolated, so a warning can be pasted into
-    * an issue without leaking it. */
+    * A bare list would not be much use: content URLs are "unsigned" only in
+    * carrying no signature of their own, and still require the bearer token, so
+    * pasting one into a browser earns a 401. The `download` subcommand exists
+    * for exactly this, and is what we point at rather than curl — it handles
+    * the key, and it is code with tests behind it. */
   def unsaved(j: VideoJob, saved: os.Path): String =
     val urls = j.contentUrls
     val out = List.newBuilder[String]
     out += s"warning: job ${j.id} returned ${urls.size} videos; only index 0 was saved to"
-    out += s"         $saved. The rest need the same bearer token:"
+    out += s"         $saved. Fetch the rest with:"
     urls.zipWithIndex.drop(1).foreach { (url, i) =>
-      out += "  curl -H \"Authorization: Bearer $OPENROUTER_API_KEY\" -o \"" +
-        sibling(saved, i) + "\" \"" + url + "\""
+      out += "  orvdo download --url \"" + url + "\" --download-as \"" + sibling(saved, i) + "\""
     }
     out.result().mkString("\n")
 

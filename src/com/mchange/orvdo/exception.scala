@@ -12,3 +12,15 @@ class OrvdoException(message : String, cause : Throwable = null) extends Excepti
 final case class AwaitVideoTimeout(jobId : String, timeout : zio.Duration) extends OrvdoException(s"Job $jobId did not finish within ${timeout.render}")
 final case class TargetExists(path: os.Path) extends OrvdoException(s"$path already exists; pass --force to overwrite it")
 final case class ApiError(status: Int, body: String) extends OrvdoException(s"OpenRouter returned HTTP $status: ${body.take(500)}")
+
+/** The requested path was occupied, so the bytes went to a job-annotated
+  * sibling instead. Nothing was lost — but the command did not do what it was
+  * told, so it still fails. `what` is "the video", "the receipt" or similar. */
+final case class SavedElsewhere(what: String, requested: os.Path, actual: os.Path)
+    extends OrvdoException(s"$requested already exists, so $what was saved as $actual instead")
+
+/** Both the requested path and its annotated fallback were occupied, so
+  * nothing was written at all. `url`, when present, is what will fetch the
+  * content that never landed. */
+final case class NotSaved(what: String, requested: os.Path, fallback: os.Path, url: Option[String])
+    extends OrvdoException(s"$requested and $fallback both exist, so $what was not written")

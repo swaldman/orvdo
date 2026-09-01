@@ -34,17 +34,16 @@ object RenderTests extends TestSuite:
       val w = Render.unsaved(job(3), os.Path("/tmp/clips/duck.mp4"))
       assert(w.contains("returned 3 videos") && w.contains("only index 0"))
 
-    test("and emits a runnable curl per unsaved URL, not a bare list"):
-      // Content URLs still need the bearer token, so a bare URL is a 401.
+    test("and points at our own download subcommand, not at curl"):
       val w = Render.unsaved(job(3), os.Path("/tmp/clips/duck.mp4"))
-      val curls = w.linesIterator.filter(_.trim.startsWith("curl")).toList
-      assert(curls.size == 2)
-      assert(curls.forall(_.contains("Authorization: Bearer")))
-      assert(curls.head.contains("index=1") && curls(1).contains("index=2"))
+      val cmds = w.linesIterator.filter(_.trim.startsWith("orvdo download")).toList
+      assert(cmds.size == 2)
+      assert(cmds.head.contains("index=1") && cmds(1).contains("index=2"))
+      assert(!w.contains("curl"))
 
-    test("the key stays a shell variable, never interpolated"):
+    test("the emitted command never contains a key"):
       val w = Render.unsaved(job(2), os.Path("/tmp/duck.mp4"))
-      assert(w.contains("$OPENROUTER_API_KEY") && !w.contains("sk-or"))
+      assert(!w.contains("sk-or") && !w.contains("Authorization"))
 
     test("target names are siblings of the saved file"):
       val w = Render.unsaved(job(3), os.Path("/tmp/clips/duck.mp4"))

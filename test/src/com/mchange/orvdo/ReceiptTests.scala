@@ -71,15 +71,76 @@ object ReceiptTests extends TestSuite:
         os.makeDir.all(video / os.up)
         os.write(video, "pretend mp4".getBytes("UTF-8"))
         val out = Output(Some(video), false, false, ReceiptTo.Derived)
-        val p = run(Main.writeReceipt(out, job, Some(video), Provenance(Some(veo), Some("a duck")))).get
+        val (p, diverted) = run(Main.writeReceipt(out, job, Some(video), Provenance(Some(veo), Some("a duck")))).get
+        assert(diverted.isEmpty)
         val text = os.read(p)
         assert(p == dir / "deep" / "clip.mp4.receipt")
         assert(text.contains("google/veo-3.1") && text.contains("Google: Veo 3.1"))
         assert(text.contains("SHA-256") && text.contains(run(Main.sha256(video))))
         assert(text.endsWith("Prompt:\na duck\n"))
 
+    test("annotated names carry the job id, keeping any extension"):
+      assert(Main.annotated(os.Path("/a/clip.mp4"), "JOB123") == os.Path("/a/clip_JOB123.mp4"))
+      assert(Main.annotated(os.Path("/a/clip"), "JOB123") == os.Path("/a/clip_JOB123"))
+      assert(Main.annotated(os.Path("/a/two.dots.mp4"), "J") == os.Path("/a/two.dots_J.mp4"))
+
+    test("a job id is sanitised before it becomes a filename"):
+      // Job ids are opaque; a separator in one must not become a directory.
+      assert(Main.annotated(os.Path("/a/clip.mp4"), "a/b c").last == "clip_a-b-c.mp4")
+
+    test("freeTarget takes the requested path when it is free"):
+      withTemp: dir =>
+        assert(Main.freeTarget(dir / "clip.mp4", "J", false) == Target.Requested(dir / "clip.mp4"))
+
+    test("freeTarget diverts rather than refusing when the name is taken"):
+      withTemp: dir =>
+        os.write(dir / "clip.mp4", "occupied")
+        assert(Main.freeTarget(dir / "clip.mp4", "JOB", false) ==
+          Target.Diverted(dir / "clip_JOB.mp4", dir / "clip.mp4"))
+
+    test("freeTarget blocks only when the fallback is taken too"):
+      withTemp: dir =>
+        os.write(dir / "clip.mp4", "occupied")
+        os.write(dir / "clip_JOB.mp4", "also occupied")
+        assert(Main.freeTarget(dir / "clip.mp4", "JOB", false) ==
+          Target.Blocked(dir / "clip.mp4", dir / "clip_JOB.mp4"))
+
+    test("--force skips diversion entirely: the caller accepted the loss"):
+      withTemp: dir =>
+        os.write(dir / "clip.mp4", "occupied")
+        assert(Main.freeTarget(dir / "clip.mp4", "JOB", true) == Target.Requested(dir / "clip.mp4"))
+
+    test("urlTag picks the job id out of a content URL"):
+      assert(Main.urlTag("https://openrouter.ai/api/v1/videos/B7pFInV/content?index=1") == "B7pFInV")
+
+    test("and falls back to something stable when the URL is another shape"):
+      val tag = Main.urlTag("https://openrouter.ai/something/else")
+      assert(tag.nonEmpty && !tag.contains("/"))
+
+    test("a receipt no longer clobbers; it diverts and says so"):
+      withTemp: dir =>
+        val video = dir / "clip.mp4"
+        os.write(video, "pretend mp4")
+        os.write(dir / "clip.mp4.receipt", "an older receipt, not to be lost")
+        val out = Output(Some(video), false, false, ReceiptTo.Derived)
+        val (p, diverted) = run(Main.writeReceipt(out, job, Some(video), Provenance())).get
+        assert(p == dir / "clip.mp4_JOB123.receipt")
+        assert(diverted == Some(dir / "clip.mp4.receipt"))
+        assert(os.read(dir / "clip.mp4.receipt") == "an older receipt, not to be lost")
+
+    test("a receipt with nowhere to go fails rather than overwriting"):
+      withTemp: dir =>
+        val video = dir / "clip.mp4"
+        os.write(video, "pretend mp4")
+        os.write(dir / "clip.mp4.receipt", "first")
+        os.write(dir / "clip.mp4_JOB123.receipt", "second")
+        val out = Output(Some(video), false, false, ReceiptTo.Derived)
+        runEither(Main.writeReceipt(out, job, Some(video), Provenance())).left.toOption.get match
+          case n: exception.NotSaved => assert(n.what == "the receipt" && n.url.isEmpty)
+          case other                 => assert(false)
+
     test("a receipt with no download omits the digest"):
       withTemp: dir =>
         val out = Output(None, false, false, ReceiptTo.Derived)
-        val p = run(Main.writeReceipt(out, job, None, Provenance())).get
+        val (p, _) = run(Main.writeReceipt(out, job, None, Provenance())).get
         try assert(!os.read(p).contains("SHA-256")) finally os.remove(p)

@@ -3,7 +3,7 @@ package com.mchange.orvdo
 import cats.data.Validated
 import cats.syntax.all.*
 import com.monovore.decline.{Argument, Command, Opts}
-import exception.AwaitVideoTimeout
+import exception.*
 import java.security.MessageDigest
 import java.time.{Instant, ZoneOffset}
 import java.time.format.DateTimeFormatter
@@ -25,6 +25,18 @@ final case class Output(
     json: Boolean,
     receipt: ReceiptTo
 )
+
+/** Where a save may go without destroying anything.
+  *
+  * Refusing outright was the old behaviour and it reads, to someone who has
+  * just paid for a render, like the render is gone. Diverting keeps the bytes
+  * and still reports failure, which is the honest combination: the file is
+  * safe, and the command did not do what was asked.
+  */
+enum Target:
+  case Requested(path: os.Path)
+  case Diverted(path: os.Path, requested: os.Path)
+  case Blocked(requested: os.Path, fallback: os.Path)
 
 /** What a receipt records beyond the job itself. Only the `submit` path knows
   * either: `check` is handed a job id and nothing about how it was asked for. */
@@ -48,6 +60,7 @@ enum Cmd:
       json: Boolean,
       receipt: ReceiptTo
   )
+  case Download(apiKey: String, url: String, target: os.Path, force: Boolean)
   case Submit(
       apiKey: String,
       model: String,
@@ -161,6 +174,59 @@ object Cli:
       case (true, None)    => ReceiptTo.Derived
       case (false, None)   => ReceiptTo.No
     }
+
+  /** `download` attaches the API key to whatever URL it is handed, so it will
+    * only do so to OpenRouter and only over TLS. A mistyped host — or one
+    * pasted from somewhere untrustworthy — would otherwise be given a working
+    * credential, which is a poor trade for the convenience of not typing curl. */
+  private def foreignHost(url: String): Option[String] =
+    scala.util.Try(java.net.URI(url)).toOption match
+      case None => Some(s"not a URL: $url")
+      case Some(u) =>
+        val scheme = Option(u.getScheme).getOrElse("")
+        val host = Option(u.getHost).getOrElse("")
+        if scheme != "https" then
+          Some(
+            s"refusing to send your API key over ${if scheme.isEmpty then "a URL with no scheme" else scheme}: $url"
+          )
+        else if host != "openrouter.ai" && !host.endsWith(".openrouter.ai") then
+          Some(s"refusing to send your API key to '$host'; download only fetches from openrouter.ai")
+        else None
+
+  private val downloadOpts: Opts[Cmd.Download] =
+    (
+      apiKey,
+      Opts.option[String](
+        "url",
+        "Content URL to fetch, as printed in a job record's Video row.",
+        short = "u",
+        metavar = "url"
+      ),
+      // `--as` is the short form; `--download-as` is kept for consistency with
+      // the other subcommands. `orElse` makes exactly one of them required and
+      // renders them as alternatives in the usage line.
+      Opts
+        .option[os.Path]("as", "Write the fetched bytes to this path.", metavar = "path")
+        .orElse(
+          Opts.option[os.Path](
+            "download-as",
+            "Synonym for --as, spelled as the other subcommands spell it.",
+            metavar = "path"
+          )
+        ),
+      force
+    ).mapN(Cmd.Download.apply)
+
+  private val download: Opts[Cmd] =
+    Opts.subcommand(
+      "download",
+      "Fetch a content URL from a job record. Content URLs are unsigned but still " +
+        "require your API key, so a browser or a bare curl will not do."
+    )(
+      downloadOpts.mapValidated { d =>
+        foreignHost(d.url).fold(Validated.valid(d))(Validated.invalidNel)
+      }
+    )
 
   private val json: Opts[Boolean] =
     Opts
@@ -297,7 +363,7 @@ object Cli:
           |
           |Generation is a job: `submit` returns immediately with a job id, `check`
           |reports the current state, and a completed job exposes a URL to download from.""".stripMargin
-    )(listModels.orElse(submit).orElse(check))
+    )(listModels.orElse(submit).orElse(check).orElse(download))
 
 object Main extends ZIOAppDefault:
 
@@ -307,6 +373,19 @@ object Main extends ZIOAppDefault:
       loadCatalog(key)
         .map(ms => filter.fold(ms)(f => ms.filter(_.matches(f))))
         .flatMap(ms => Console.printLine(Render.models(ms, filter)))
+
+    case d: Cmd.Download =>
+      // The same no-clobber policy as a job download, so the two behave alike.
+      // There is no job in hand here, so the annotation comes from the URL.
+      def save(path: os.Path) =
+        OpenRouter.download(d.apiKey, d.url, path, force = true) *>
+          Console.printLine(Render.saved(path))
+      freeTarget(d.target, urlTag(d.url), d.force) match
+        case Target.Requested(path) => save(path)
+        case Target.Diverted(path, requested) =>
+          save(path) *> ZIO.fail(SavedElsewhere("the download", requested, path))
+        case Target.Blocked(requested, fallback) =>
+          ZIO.fail(NotSaved("the download", requested, fallback, Some(d.url)))
 
     case c: Cmd.Check =>
       for
@@ -563,9 +642,10 @@ object Main extends ZIOAppDefault:
   ): Task[Unit] =
     for
       attempted <- downloadFor(apiKey, out.downloadAs, out.force, job.value).either
+      saved = attempted.toOption.flatten
       _ <- printJob(job, out.json)
-      _ <- attempted match
-        case Right(Some(path)) =>
+      _ <- saved match
+        case Some((path, _)) =>
           // `downloadFor` takes `firstContentUrl`, so a job with several
           // outputs loses all but index 0 unless we say so. Stderr, since the
           // record on stdout already lists every URL.
@@ -573,17 +653,25 @@ object Main extends ZIOAppDefault:
             progress(Render.unsaved(job.value, path))
               .when(job.value.contentUrls.sizeIs > 1)
               .unit
-        case _ => ZIO.unit
+        case None => ZIO.unit
       // A receipt is written whether or not the download worked, and records
       // the digest only when there is a file to digest. Its own failure is
       // captured for the same reason the download's is: the record has been
       // printed by now and must not be retracted.
-      wrote <- writeReceipt(out, job.value, attempted.toOption.flatten, provenance).either
+      wrote <- writeReceipt(out, job.value, saved.map(_._1), provenance).either
       _ <- wrote match
-        case Right(Some(path)) => Console.printLine(Render.receiptAt(path))
-        case _                 => ZIO.unit
+        case Right(Some((path, _))) => Console.printLine(Render.receiptAt(path))
+        case _                      => ZIO.unit
       _ <- ZIO.fromEither(attempted).unit
       _ <- ZIO.fromEither(wrote).unit
+      // Everything landed, but possibly not where it was asked to. That is
+      // still a failure, reported after the record so nothing is retracted.
+      _ <- saved match
+        case Some((path, Some(requested))) => ZIO.fail(SavedElsewhere("the video", requested, path))
+        case _                             => ZIO.unit
+      _ <- wrote.toOption.flatten match
+        case Some((path, Some(requested))) => ZIO.fail(SavedElsewhere("the receipt", requested, path))
+        case _                             => ZIO.unit
     yield ()
 
   private[orvdo] def writeReceipt(
@@ -591,16 +679,24 @@ object Main extends ZIOAppDefault:
       job: VideoJob,
       downloaded: Option[os.Path],
       provenance: Provenance
-  ): Task[Option[os.Path]] =
+  ): Task[Option[(os.Path, Option[os.Path])]] =
     if out.receipt == ReceiptTo.No then ZIO.none
     else
       for
         digest <- ZIO.foreach(downloaded)(p => sha256(p).map(p -> _))
-        path = receiptPath(out, job, provenance.model.map(_.id).orElse(job.model))
+        desired = receiptPath(out, job, provenance.model.map(_.id).orElse(job.model))
+        // Receipts used to be written with `os.write.over`, on the reasoning
+        // that a derived artefact may be regenerated. But a receipt records a
+        // render that cost money and may name a file the new one does not, so
+        // it gets the same protection as the video.
+        path <- freeTarget(desired, job.id, out.force) match
+          case Target.Requested(p)   => ZIO.succeed(p -> None)
+          case Target.Diverted(p, r) => ZIO.succeed(p -> Some(r))
+          case Target.Blocked(r, f)  => ZIO.fail(NotSaved("the receipt", r, f, None))
         _ <- ZIO.attemptBlocking {
-          os.makeDir.all(path / os.up)
+          os.makeDir.all(path._1 / os.up)
           os.write.over(
-            path,
+            path._1,
             Render.receipt(provenance.model, job, digest, provenance.prompt, provenance.body) + "\n"
           )
         }
@@ -610,10 +706,37 @@ object Main extends ZIOAppDefault:
     * for the model and job otherwise, so it is identifiable alone. A model id
     * carries a slash, which would read as a directory, hence the substitution.
     */
+  /** `clip.mp4` becomes `clip_<jobId>.mp4`, and an extensionless `clip`
+    * becomes `clip_<jobId>`. Annotated rather than numbered, so the filename
+    * says which render it holds. Job ids are opaque, so anything that is not
+    * filename-safe is replaced rather than trusted. */
+  /** The job id inside an OpenRouter content URL, for annotating a fallback
+    * name when `download` is handed a path that is taken. A timestamp stands in
+    * when the URL is not of that shape: the annotation only has to be stable
+    * and distinct, and guessing a job id would be worse than not having one. */
+  private[orvdo] def urlTag(url: String): String =
+    """/videos/([^/?#]+)/content""".r.findFirstMatchIn(url).map(_.group(1)).getOrElse(timestamp())
+
+  private[orvdo] def annotated(path: os.Path, jobId: String): os.Path =
+    val safe = jobId.map(c => if c.isLetterOrDigit || "-_.".contains(c) then c else '-')
+    val suffix = if path.ext.isEmpty then "" else "." + path.ext
+    path / os.up / s"${path.baseName}_$safe$suffix"
+
+  /** Decide where a save can land. `--force` means the caller has already
+    * accepted the loss, so no diversion is attempted. */
+  private[orvdo] def freeTarget(desired: os.Path, jobId: String, force: Boolean): Target =
+    if force || !os.exists(desired) then Target.Requested(desired)
+    else
+      val fallback = annotated(desired, jobId)
+      if os.exists(fallback) then Target.Blocked(desired, fallback)
+      else Target.Diverted(fallback, desired)
+
   private[orvdo] def receiptPath(out: Output, job: VideoJob, modelId: Option[String]): os.Path =
     out.receipt match
       case ReceiptTo.At(path) => path
       case _ =>
+        // Follows the file that actually landed, so a diverted video takes its
+        // receipt with it: `clip_JOB.mp4` gets `clip_JOB.mp4.receipt`.
         out.downloadAs match
           case Some(video) => video / os.up / s"${video.last}.receipt"
           case None =>
@@ -643,16 +766,30 @@ object Main extends ZIOAppDefault:
       digest.digest().map(b => f"${b & 0xff}%02x").mkString
     }
 
+  /** Save the video, diverting rather than refusing when the name is taken.
+    *
+    * Returns the path written and, when it is not the path asked for, the one
+    * that was. The caller reports that as a failure — the bytes are safe, but
+    * the command did not do what it was told. */
   private def downloadFor(
       apiKey: String,
       target: Option[os.Path],
       force: Boolean,
       job: VideoJob
-  ): Task[Option[os.Path]] =
+  ): Task[Option[(os.Path, Option[os.Path])]] =
     (target, job.firstContentUrl) match
       case (None, _) => ZIO.none
-      case (Some(path), Some(url)) =>
-        OpenRouter.download(apiKey, url, path, force).asSome
+      case (Some(desired), Some(url)) =>
+        freeTarget(desired, job.id, force) match
+          case Target.Requested(path) =>
+            // force = true here even when the caller did not ask for it: we
+            // have just established the path is free, and `download`'s own
+            // guard would only re-check it.
+            OpenRouter.download(apiKey, url, path, force = true).map(p => Some(p -> None))
+          case Target.Diverted(path, requested) =>
+            OpenRouter.download(apiKey, url, path, force = true).map(p => Some(p -> Some(requested)))
+          case Target.Blocked(requested, fallback) =>
+            ZIO.fail(NotSaved("the video", requested, fallback, Some(url)))
       case (Some(_), None) =>
         ZIO.fail(
           new RuntimeException(
@@ -670,8 +807,33 @@ object Main extends ZIOAppDefault:
         List(
           s"error: ${t.getMessage}",
           "       the job is probably still rendering; pick it up again with",
-          s"       check --job-id ${t.jobId} --await --download-as <path>"
+          s"       orvdo check --job-id ${t.jobId} --await --download-as <path>"
         )
+      case d: SavedElsewhere =>
+        // Loud on purpose. The failure exit is honest -- we did not write where
+        // we were told -- but a bare "error:" line invites the reader to think
+        // a render they paid for is gone, when it is on disk one line down.
+        List(
+          s"error: ${d.requested}",
+          "       already exists, so it was NOT overwritten.",
+          s"       ${d.what.capitalize} was saved instead as:",
+          s"           ${d.actual}",
+          "       Nothing has been lost. Pass --force to overwrite the original name."
+        )
+
+      case n: NotSaved =>
+        List(
+          s"error: ${n.requested}",
+          s"       and ${n.fallback}",
+          s"       both exist, so ${n.what} was not written."
+        ) ++ n.url.fold(Nil)(u =>
+          List(
+            "       The content is still on OpenRouter, and is not lost. Fetch it with:",
+            "           orvdo download --url \"" + u + "\" --as <a free path>",
+            "       or re-run with --force to overwrite."
+          )
+        )
+
       case other => List(s"error: ${other.getMessage}")
     ZIO.foreachDiscard(lines)(Console.printLineError(_).ignore).as(ExitCode.failure)
 

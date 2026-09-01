@@ -220,22 +220,48 @@ That waits if the job is still running, fetches it if it is not, and saves
 either way. On `submit`, `--download-as` requires `--await`, because there is
 no video until the job finishes. On `check` it does not: a job that has already
 completed has a URL to fetch right now. On both, `--force` requires
-`--download-as`. All enforced at parse time. Without `--force` an existing target is left
-alone and the command exits non-zero — but the job details, including the
-download URL, are printed first either way.
+`--download-as`. All enforced at parse time.
 
-If a job returns more than one video, `--download-as` saves index 0 and warns
-about the rest on stderr, with a command for each that will fetch it:
+Nothing is ever overwritten without `--force`. If the target name is taken, the
+file is saved beside it under a job-annotated name instead, loudly:
+
+```
+error: /Users/you/clips/duck.mp4
+       already exists, so it was NOT overwritten.
+       The video was saved instead as:
+           /Users/you/clips/duck_B7pFInVvvptLkVDxixee.mp4
+       Nothing has been lost. Pass --force to overwrite the original name.
+```
+
+The command still exits non-zero, because it did not do what you asked — but
+the render is on disk, not lost. Only if that fallback name is *also* taken is
+nothing written, and then the error names the `orvdo download` command that
+will fetch the content. Receipts follow the same rule, and take their name from
+the file that actually landed. The job details, including the content URL, are
+printed before any of this either way.
+
+Any content URL can be fetched on its own with `download`:
+
+```
+./mill run download --url "https://…/videos/abc123/content?index=0" --as out/clip.mp4
+```
+
+`--as` and `--download-as` are synonyms and exactly one is required — the short
+spelling for typing, the long one for consistency with `submit` and `check`.
+
+Content URLs are unsigned but still require your API key, so a browser or a
+bare `curl` will not do. Because the command attaches that key, it refuses any
+host but `openrouter.ai` and refuses plaintext `http` — a mistyped or pasted
+hostile URL would otherwise be handed a working credential.
+
+If a job returns more than one video, `--download-as` saves index 0 and names
+the rest on stderr, with the command to fetch each:
 
 ```
 warning: job B7pFInVv… returned 3 videos; only index 0 was saved to
-         /Users/you/clips/duck.mp4. The rest need the same bearer token:
-  curl -H "Authorization: Bearer $OPENROUTER_API_KEY" -o "/Users/you/clips/duck-1.mp4" "https://…?index=1"
+         /Users/you/clips/duck.mp4. Fetch the rest with:
+  orvdo download --url "https://…?index=1" --download-as "/Users/you/clips/duck-1.mp4"
 ```
-
-Content URLs are unsigned but still require the token, so a bare URL in a
-browser gets a 401 — hence the full command. Your key is referenced as a shell
-variable, not printed.
 
 Progress lines go to stderr; job records and model listings go to stdout, so
 `./mill run check --job-id abc123 > job.txt` captures just the record.

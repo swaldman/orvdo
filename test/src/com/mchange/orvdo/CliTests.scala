@@ -81,6 +81,51 @@ object CliTests extends TestSuite:
         case ReceiptTo.At(p) => p.last == "r.txt"
         case _               => false)
 
+    val contentUrl = "https://openrouter.ai/api/v1/videos/j/content?index=1"
+
+    test("download requires a url and a target"):
+      assert(parse("download").isLeft)
+      assert(parse("download", "--url", contentUrl).isLeft)
+
+    test("a missing target names both spellings"):
+      val e = errorOf("download", "-u", contentUrl)
+      assert(e.contains("--as") && e.contains("--download-as"))
+
+    test("--as and --download-as are synonyms"):
+      def target(flag: String) = parse("download", "-u", contentUrl, flag, "out.mp4") match
+        case Right(d: Cmd.Download) => Some(d.target)
+        case _                      => None
+      assert(target("--as").isDefined)
+      assert(target("--as") == target("--download-as"))
+
+    test("but they are alternatives, not both at once"):
+      assert(parse("download", "-u", contentUrl, "--as", "a.mp4", "--download-as", "b.mp4").isLeft)
+
+    test("download accepts an openrouter content URL"):
+      parse("download", "-u", "https://openrouter.ai/api/v1/videos/j/content?index=1",
+            "--download-as", "out.mp4") match
+        case Right(d: Cmd.Download) => assert(d.url.contains("index=1") && d.target.last == "out.mp4")
+        case other                  => assert(false)
+
+    test("download refuses to send the key to another host"):
+      val e = errorOf("download", "-u", "https://evil.example.com/steal", "--download-as", "out.mp4")
+      assert(e.contains("refusing to send your API key"))
+      assert(e.contains("evil.example.com"))
+
+    test("download refuses plaintext http"):
+      val e = errorOf("download", "-u", "http://openrouter.ai/x", "--download-as", "out.mp4")
+      assert(e.contains("refusing to send your API key over http"))
+
+    test("download refuses a non-URL"):
+      assert(errorOf("download", "-u", "not a url", "--download-as", "out.mp4").nonEmpty)
+
+    test("download allows an openrouter subdomain"):
+      assert(parse("download", "-u", "https://cdn.openrouter.ai/x", "--download-as", "o.mp4").isRight)
+
+    test("download does not allow a lookalike host"):
+      val e = errorOf("download", "-u", "https://openrouter.ai.evil.com/x", "--download-as", "o.mp4")
+      assert(e.contains("refusing to send your API key"))
+
     test("an unknown subcommand is rejected"):
       assert(parse("nosuchthing").isLeft)
 
