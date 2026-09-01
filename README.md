@@ -4,6 +4,29 @@ A small CLI and library over OpenRouter's asynchronous video generation API.
 upickle for JSON, requests-scala for HTTP, ZIO for the operations, decline for
 the command line, os-lib for the filesystem.
 
+## Build
+
+Mill, with the wrapper checked in — no global install needed:
+
+```
+./mill compile
+./mill run <subcommand> [options]     # the CLI, from the build
+./mill assembly                       # a self-executing jar
+./mill publishLocal                   # into ~/.ivy2/local
+./mill publishMchange                 # into the mchange staging repository
+```
+
+`./mill run` is convenient while developing, but it decorates any non-zero exit
+with a `Subprocess failed` line of its own. For actual use, `./mill assembly`
+writes a launcher to `out/assembly.dest/out.jar` that runs directly and exits
+with the CLI's own status:
+
+```
+out/assembly.dest/out.jar list-models -f veo
+```
+
+The examples below are written as `./mill run …`; substitute the jar freely.
+
 ## Setup
 
 ```
@@ -17,9 +40,9 @@ stack trace.
 ## Usage
 
 ```
-scala-cli run . -- --help
-scala-cli run . -- list-models
-scala-cli run . -- check --job-id abc123
+./mill run --help
+./mill run list-models
+./mill run check --job-id abc123
 ```
 
 The full listing runs to a couple of dozen models, so `list-models` takes a
@@ -27,8 +50,8 @@ The full listing runs to a couple of dozen models, so `list-models` takes a
 text, case-insensitively:
 
 ```
-scala-cli run . -- list-models -f veo        # google/veo-3.1, -fast, -lite
-scala-cli run . -- list-models -f spacexai   # matches on the name, not the id
+./mill run list-models -f veo        # google/veo-3.1, -fast, -lite
+./mill run list-models -f spacexai   # matches on the name, not the id
 ```
 
 Each entry shows every field the catalog carries for that model; anything null
@@ -56,7 +79,7 @@ what they cost — pricing is the `pricing` row's business.
 Submit and print the job record immediately:
 
 ```
-scala-cli run . -- submit -m google/veo-3.1 -p prompt.txt -d 8 -r 1080p -a 16:9
+./mill run submit -m google/veo-3.1 -p prompt.txt -d 8 -r 1080p -a 16:9
 ```
 
 `--duration`, `--resolution` and `--aspect-ratio` are checked against the
@@ -75,7 +98,7 @@ Matching ignores case and the catalog's spelling is what goes on the wire, so
 Submit, poll to completion, and save the result:
 
 ```
-scala-cli run . -- submit \
+./mill run submit \
   -m google/veo-3.1 \
   -p prompt.txt \
   -d 8 \
@@ -115,8 +138,8 @@ per-second price where it is billed separately — Veo 3.1 charges
 `duration_seconds_with_audio` at $0.40 against $0.20 without:
 
 ```
-scala-cli run . -- submit -m google/veo-3.1 -p prompt.txt --generate-audio
-scala-cli run . -- submit -m google/veo-3.1 -p prompt.txt --no-generate-audio
+./mill run submit -m google/veo-3.1 -p prompt.txt --generate-audio
+./mill run submit -m google/veo-3.1 -p prompt.txt --no-generate-audio
 ```
 
 Either flag settles the question and drops the `audio` row;
@@ -131,7 +154,7 @@ there is no surprise to guard against.
 Pin the opening or closing frame, or supply style references:
 
 ```
-scala-cli run . -- submit -m google/veo-3.1 -p prompt.txt \
+./mill run submit -m google/veo-3.1 -p prompt.txt \
   --first-frame https://example.com/open.png \
   --last-frame  https://example.com/close.png \
   --reference   https://example.com/style.png
@@ -156,7 +179,7 @@ Model-specific options go through `--param key=value` (`-P`), repeatable. The
 `passthrough` row of `list-models` shows what a model accepts:
 
 ```
-scala-cli run . -- submit -m bytedance/seedance-2.0-mini -p prompt.txt \
+./mill run submit -m bytedance/seedance-2.0-mini -p prompt.txt \
   -P return_last_frame=true --await --json
 ```
 
@@ -184,7 +207,7 @@ sent, with a warning that it may be silently dropped.
 ask for at submit time can be picked up afterwards:
 
 ```
-scala-cli run . -- check --job-id abc123 --await --download-as out/clip.mp4
+./mill run check --job-id abc123 --await --download-as out/clip.mp4
 ```
 
 That waits if the job is still running, fetches it if it is not, and saves
@@ -196,7 +219,7 @@ alone and the command exits non-zero — but the job details, including the
 download URL, are printed first either way.
 
 Progress lines go to stderr; job records and model listings go to stdout, so
-`scala-cli run . -- check --job-id abc123 > job.txt` captures just the record.
+`./mill run check --job-id abc123 > job.txt` captures just the record.
 
 ## Receipts
 
@@ -204,7 +227,7 @@ How a video was made is easy to lose once the shell scrollback is gone.
 `--receipt` writes it down:
 
 ```
-scala-cli run . -- submit -m google/veo-3.1 -p prompt.txt \
+./mill run submit -m google/veo-3.1 -p prompt.txt \
   --await --download-as out/clip.mp4 --receipt
 ```
 
@@ -236,13 +259,37 @@ with slashes in the model id replaced so it stays one filename.
 no prompt — a job id says nothing about how it was asked for. `submit` without
 `--await` still writes one, recording the model and prompt while they are known.
 
+## Using it as a library
+
+`com.mchange.orvdo.OpenRouter` is the whole API, and every operation comes in
+two shapes:
+
+```scala
+OpenRouter.submit(apiKey, request)      // Task[VideoJob]
+OpenRouter.rawSubmit(apiKey, request)   // Task[Raw[VideoJob]]
+```
+
+The plain form is for callers who want the parsed value and nothing else. The
+`raw` form additionally carries the JSON the value was parsed from, which is
+what makes it possible to notice fields OpenRouter sent that the wire types do
+not model — see below. Both exist for `submit`, `check`, `listModels` and
+`awaitCompletion`; `providerTags` and `download` have one form each, since
+neither returns a modelled envelope.
+
+There is no cost to the plain form: internally each operation is written once
+against a `JsonWrapper[T[_]]`, instantiated at `Raw` or at `Id[T] = T`, so the
+non-raw path discards the JSON rather than wrapping and unwrapping it.
+
+Nothing below the CLI reads the environment — `apiKey` is a parameter
+throughout.
+
 ## Seeing the whole response
 
 `submit` and `check` take `--json`, which prints the response OpenRouter
 actually sent rather than the formatted rows:
 
 ```
-scala-cli run . -- check --job-id abc123 --json
+./mill run check --job-id abc123 --json
 ```
 
 This matters because uPickle discards keys the wire types do not declare, which
