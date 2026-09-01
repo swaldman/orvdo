@@ -1,4 +1,4 @@
-package orvideo
+package orvdo
 
 import scala.compiletime.constValueTuple
 import scala.deriving.Mirror

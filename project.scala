@@ -7,4 +7,4 @@
 //> using dep com.monovore::decline:2.6.2
 
 // Run with:  scala-cli run . -- <subcommand> [options]
-// Package:   scala-cli --power package . -o orvideo --assembly
+// Package:   scala-cli --power package . -o orvdo --assembly

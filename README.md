@@ -1,6 +1,6 @@
-# orvideo
+# orvdo
 
-A small CLI over OpenRouter's asynchronous video generation API.
+A small CLI and library over OpenRouter's asynchronous video generation API.
 upickle for JSON, requests-scala for HTTP, ZIO for the operations, decline for
 the command line, os-lib for the filesystem.
 

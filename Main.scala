@@ -1,4 +1,4 @@
-package orvideo
+package orvdo
 
 import cats.data.Validated
 import cats.syntax.all.*
@@ -283,7 +283,7 @@ object Cli:
 
   val command: Command[Cmd] =
     Command(
-      name = "orvideo",
+      name = "orvdo",
       header =
         """Generate videos with OpenRouter's asynchronous video API.
           |
@@ -571,7 +571,7 @@ object Main extends ZIOAppDefault:
       _ <- ZIO.fromEither(wrote).unit
     yield ()
 
-  private[orvideo] def writeReceipt(
+  private[orvdo] def writeReceipt(
       out: Output,
       job: VideoJob,
       downloaded: Option[os.Path],
@@ -592,7 +592,7 @@ object Main extends ZIOAppDefault:
     * for the model and job otherwise, so it is identifiable alone. A model id
     * carries a slash, which would read as a directory, hence the substitution.
     */
-  private[orvideo] def receiptPath(out: Output, job: VideoJob, modelId: Option[String]): os.Path =
+  private[orvdo] def receiptPath(out: Output, job: VideoJob, modelId: Option[String]): os.Path =
     out.receipt match
       case ReceiptTo.At(path) => path
       case _ =>
@@ -611,7 +611,7 @@ object Main extends ZIOAppDefault:
   /** Streamed rather than read whole: a 4K clip runs to hundreds of megabytes,
     * and the digest is the one part of a receipt that should not itself be a
     * reason to run out of memory. */
-  private[orvideo] def sha256(path: os.Path): Task[String] =
+  private[orvdo] def sha256(path: os.Path): Task[String] =
     ZIO.attemptBlocking {
       val digest = MessageDigest.getInstance("SHA-256")
       val buffer = new Array[Byte](64 * 1024)
