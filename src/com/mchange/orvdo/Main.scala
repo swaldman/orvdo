@@ -28,7 +28,14 @@ final case class Output(
 
 /** What a receipt records beyond the job itself. Only the `submit` path knows
   * either: `check` is handed a job id and nothing about how it was asked for. */
-final case class Provenance(model: Option[VideoModel] = None, prompt: Option[String] = None)
+final case class Provenance(
+    model: Option[VideoModel] = None,
+    prompt: Option[String] = None,
+    /** The JSON actually submitted, so the receipt can record what we asked
+      * for and not merely what came back. Only `submit` has it: `check` is
+      * handed a job id and knows nothing about how it was requested. */
+    body: Option[ujson.Value] = None
+)
 
 enum Cmd:
   case ListModels(apiKey: String, filter: Option[String])
@@ -331,7 +338,7 @@ object Main extends ZIOAppDefault:
         _ <- ZIO.when(chosen.nonEmpty)(progress(Render.defaults(s.model, chosen)))
         provider <- passthroughFor(s, model)
         job <- OpenRouter.rawSubmit(s.apiKey, request, provider)
-        provenance = Provenance(Some(model), Some(prompt))
+        provenance = Provenance(Some(model), Some(prompt), Some(VideoRequest.body(request, provider)))
         out = Output(s.downloadAs, s.force, s.json, s.receipt)
         _ <-
           // Without --await there is nothing to download, so this reduces to
@@ -592,7 +599,10 @@ object Main extends ZIOAppDefault:
         path = receiptPath(out, job, provenance.model.map(_.id).orElse(job.model))
         _ <- ZIO.attemptBlocking {
           os.makeDir.all(path / os.up)
-          os.write.over(path, Render.receipt(provenance.model, job, digest, provenance.prompt) + "\n")
+          os.write.over(
+            path,
+            Render.receipt(provenance.model, job, digest, provenance.prompt, provenance.body) + "\n"
+          )
         }
       yield Some(path)
 

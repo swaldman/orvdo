@@ -266,8 +266,25 @@ Prompt:
 a duck wearing a tiny hat
 ```
 
-The digest lets a file be checked against the record later, and the prompt is
-the part nothing else remembers.
+When the receipt is written by `submit`, it also records the request:
+
+```
+Request:
+  duration          4
+  resolution        480p
+  aspect_ratio      1:1
+  generate_audio    false
+  frame_images      first_frame=https://example.com/open.png
+  passthrough       seed: return_last_frame=true
+
+Prompt:
+a duck wearing a tiny hat
+```
+
+The digest lets a file be checked against the record later; the request and the
+prompt are the parts nothing else remembers. A completed job says nothing about
+the aspect ratio or the audio setting that produced it, which is what you need
+to run it again.
 
 Where it lands, unless `--receipt-as path` says otherwise: beside the video as
 `<download-as>.receipt` when one was saved, so the pair travels together;

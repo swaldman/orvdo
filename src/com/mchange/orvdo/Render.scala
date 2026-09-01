@@ -96,6 +96,43 @@ object Render:
     }
     out.result().mkString("\n")
 
+  /** `frame_images` and `input_references` as `first_frame=<url>` rather than
+    * the raw content-part objects, which are unreadable on one line. */
+  private def images(v: ujson.Value): String =
+    v.arrOpt.toList.flatten.map { part =>
+      val o = part.objOpt
+      val url = o.flatMap(_.get("image_url")).flatMap(_.objOpt).flatMap(_.get("url"))
+        .map(scalar).getOrElse("?")
+      o.flatMap(_.get("frame_type")).map(t => s"${scalar(t)}=$url").getOrElse(url)
+    }.mkString(", ")
+
+  /** `provider.options.<tag>.parameters` flattened to `<tag>: k=v, k=v`. */
+  private def passthroughOf(v: ujson.Value): String =
+    v.objOpt.flatMap(_.get("options")).flatMap(_.objOpt).toList.flatMap(_.toList).map { (tag, cfg) =>
+      s"$tag: " + cfg.objOpt.flatMap(_.get("parameters")).map(compact).getOrElse("")
+    }.mkString("; ")
+
+  private def requestValue(key: String, v: ujson.Value): String = key match
+    case "frame_images" | "input_references" => images(v)
+    case "provider"                          => passthroughOf(v)
+    case _                                   => compact(v)
+
+  /** What we asked for, as opposed to what came back.
+    *
+    * Read off the JSON that was sent rather than enumerated from
+    * `VideoRequest`, so a field added there appears here without anyone having
+    * to remember. `model` and `prompt` are skipped: the receipt already shows
+    * both, one at the top and one at the bottom. */
+  private def requestSection(body: ujson.Value): List[String] =
+    val rows = body.objOpt.toList
+      .flatMap(_.toList)
+      .filterNot((k, _) => k == "model" || k == "prompt")
+      .map((k, v) => (if k == "provider" then "passthrough" else k) -> requestValue(k, v))
+    if rows.isEmpty then Nil
+    else
+      val width = math.max(LabelWidth, rows.map(_._1.length).max + 2)
+      "" :: "Request:" :: rows.map((label, value) => "  " + label.padTo(width, ' ') + value)
+
   /** A standalone record of how a video came to exist, meant to outlive the
     * shell that made it.
     *
@@ -108,7 +145,8 @@ object Render:
       model: Option[VideoModel],
       j: VideoJob,
       saved: Option[(os.Path, String)],
-      prompt: Option[String]
+      prompt: Option[String],
+      body: Option[ujson.Value] = None
   ): String =
     val out = List.newBuilder[String]
 
@@ -127,6 +165,8 @@ object Render:
       out += row("Saved", path.toString)
       out += row("SHA-256", digest)
     }
+
+    body.foreach(b => requestSection(b).foreach(out += _))
 
     prompt.foreach(p => out += s"\nPrompt:\n$p")
 

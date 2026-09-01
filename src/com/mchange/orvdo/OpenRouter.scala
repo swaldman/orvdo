@@ -44,8 +44,7 @@ object OpenRouter:
       provider: Option[ujson.Value] = None
   ): Task[T[VideoJob]] =
     ZIO.attemptBlocking:
-      val body = upickle.default.writeJs(request)
-      provider.foreach(p => body.obj("provider") = p)
+      val body = VideoRequest.body(request, provider)
       _readJob[T](
         requests.post(
           s"$BaseUrl/videos",

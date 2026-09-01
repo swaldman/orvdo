@@ -91,6 +91,60 @@ object RenderTests extends TestSuite:
       val withModel = job(1).copy(model = Some("google/veo-3.1"))
       assert(Render.receipt(None, withModel, None, None).contains("Model"))
 
+    test("a receipt records what we asked for, not just what came back"):
+      val body = VideoRequest.body(VideoRequest(
+        model = "google/veo-3.1", prompt = "a duck", duration = Some(8),
+        resolution = Some("1080p"), aspect_ratio = Some("16:9"),
+        generate_audio = Some(true)))
+      val r = Render.receipt(Some(veo), job(1), None, Some("a duck"), Some(body))
+      assert(r.contains("Request:"))
+      assert(r.contains("duration") && r.contains("8"))
+      assert(r.contains("resolution") && r.contains("1080p"))
+      assert(r.contains("aspect_ratio") && r.contains("16:9"))
+      assert(r.contains("generate_audio") && r.contains("true"))
+
+    test("the Request section skips model and prompt, shown elsewhere"):
+      val body = VideoRequest.body(VideoRequest(model = "m", prompt = "p", duration = Some(4)))
+      val section = Render.receipt(None, job(1), None, None, Some(body))
+        .linesIterator.dropWhile(_ != "Request:").toList
+      assert(section.exists(_.contains("duration")))
+      assert(!section.exists(_.trim.startsWith("model")) && !section.exists(_.trim.startsWith("prompt")))
+
+    test("a request with nothing but model and prompt yields no Request section"):
+      val body = VideoRequest.body(VideoRequest(model = "m", prompt = "p"))
+      assert(!Render.receipt(None, job(1), None, None, Some(body)).contains("Request:"))
+
+    test("frame images read as frame_type=url, not raw content parts"):
+      val body = VideoRequest.body(VideoRequest(model = "m", prompt = "p",
+        frame_images = Some(List(
+          ImagePart(ImageUrl("https://x/a.png"), Some("first_frame")),
+          ImagePart(ImageUrl("https://x/z.png"), Some("last_frame")))),
+        input_references = Some(List(ImagePart(ImageUrl("https://x/s.png"))))))
+      val r = Render.receipt(None, job(1), None, None, Some(body))
+      assert(r.contains("first_frame=https://x/a.png"))
+      assert(r.contains("last_frame=https://x/z.png"))
+      assert(r.contains("input_references") && r.contains("https://x/s.png"))
+      assert(!r.contains("image_url"))   // the raw shape must not leak through
+
+    test("passthrough parameters are flattened under their provider tag"):
+      val body = VideoRequest.body(
+        VideoRequest(model = "m", prompt = "p"),
+        Some(Passthrough.block(List("seed"), List(Param("return_last_frame", ujson.Bool(true))))))
+      val r = Render.receipt(None, job(1), None, None, Some(body))
+      assert(r.contains("passthrough") && r.contains("seed: return_last_frame=true"))
+
+    test("the Request section reads off the JSON, so new fields need no upkeep"):
+      // A field VideoRequest does not model at all still appears.
+      val body = VideoRequest.body(VideoRequest(model = "m", prompt = "p"))
+      body.obj("some_future_field") = ujson.Str("x")
+      assert(Render.receipt(None, job(1), None, None, Some(body)).contains("some_future_field"))
+
+    test("Request sits between the digest and the prompt"):
+      val body = VideoRequest.body(VideoRequest(model = "m", prompt = "p", duration = Some(4)))
+      val r = Render.receipt(Some(veo), job(1), Some(os.Path("/tmp/x.mp4") -> "abc"), Some("a duck"), Some(body))
+      assert(r.indexOf("SHA-256") < r.indexOf("Request:"))
+      assert(r.indexOf("Request:") < r.indexOf("Prompt:"))
+
     test("list-models distinguishes empty from filtered-to-empty"):
       assert(Render.models(Nil, None).contains("No video generation models available"))
       assert(Render.models(Nil, Some("zzz")).contains("match 'zzz'"))

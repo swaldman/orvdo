@@ -45,6 +45,17 @@ final case class VideoRequest(
     callback_url: Option[String] = None
 ) derives ReadWriter
 
+object VideoRequest:
+  /** The body `submit` actually puts on the wire: the modelled fields, plus the
+    * provider block when there are passthrough parameters.
+    *
+    * Shared with the receipt rather than reconstructed there, so what a receipt
+    * records is by construction what was sent. */
+  def body(request: VideoRequest, provider: Option[ujson.Value] = None): ujson.Value =
+    val obj = upickle.default.writeJs(request)
+    provider.foreach(p => obj.obj("provider") = p)
+    obj
+
 final case class Usage(
     cost: Option[Double] = None,
     is_byok: Option[Boolean] = None
