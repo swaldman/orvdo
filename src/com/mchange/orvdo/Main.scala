@@ -302,7 +302,7 @@ object Main extends ZIOAppDefault:
 
     case c: Cmd.Check =>
       for
-        job <- OpenRouter.check(c.apiKey, c.jobId)
+        job <- OpenRouter.rawCheck(c.apiKey, c.jobId)
         // A job that has already finished needs no waiting, and saying we are
         // about to wait for it would be a small lie.
         finished <-
@@ -329,7 +329,7 @@ object Main extends ZIOAppDefault:
         (request, chosen) = cheapest(s, prompt, model)
         _ <- ZIO.when(chosen.nonEmpty)(progress(Render.defaults(s.model, chosen)))
         provider <- passthroughFor(s, model)
-        job <- OpenRouter.submit(s.apiKey, request, provider)
+        job <- OpenRouter.rawSubmit(s.apiKey, request, provider)
         provenance = Provenance(Some(model), Some(prompt))
         out = Output(s.downloadAs, s.force, s.json, s.receipt)
         _ <-
@@ -353,7 +353,7 @@ object Main extends ZIOAppDefault:
     * happened to fetch it. */
   private def loadCatalog(apiKey: String): Task[List[VideoModel]] =
     for
-      raw <- OpenRouter.listModels(apiKey)
+      raw <- OpenRouter.rawListModels(apiKey)
       _ <- warnUnmodeled("VideoModels", Wire.unmodeled(raw.json, VideoModels.knownKeys))
       _ <- warnUnmodeled(
         "VideoModel",
@@ -539,7 +539,7 @@ object Main extends ZIOAppDefault:
     * `check --await` is the same wait `submit --await` performs, for a user
     * picking up the `--await` they did not ask for the first time. */
   private def awaitTerminal(apiKey: String, job: Raw[VideoJob], opening: String): Task[Raw[VideoJob]] =
-    progress(opening) *> OpenRouter.awaitCompletion(apiKey, job)(j => progress(s"  ${j.status}").ignore)
+    progress(opening) *> OpenRouter.rawAwaitCompletion(apiKey, job)(j => progress(s"  ${j.status}").ignore)
 
   /** Print the job record, then save if asked, then re-raise a download failure.
     *
