@@ -1,0 +1,149 @@
+package orvideo
+
+import java.time.{Instant, ZoneOffset}
+
+object Render:
+
+  private val LabelWidth = 12
+
+  private def row(label: String, value: String): String =
+    // A label at or past the column width still needs a separator, or a long
+    // passthrough key runs straight into its value.
+    if label.length >= LabelWidth then s"$label $value"
+    else label.padTo(LabelWidth, ' ') + value
+
+  /** A one-line rendering of any JSON, so a field whose shape we deliberately
+    * did not commit to still shows the reader what arrived. */
+  private def compact(v: ujson.Value): String = v match
+    case ujson.Arr(vs)  => vs.map(scalar).mkString(", ")
+    case ujson.Obj(kvs) => kvs.map((k, x) => s"$k=${scalar(x)}").mkString(", ")
+    case other          => scalar(other)
+
+  private def yesNo(b: Boolean): String = if b then "yes" else "no"
+
+  private def date(epochSeconds: Long): String =
+    Instant.ofEpochSecond(epochSeconds).atZone(ZoneOffset.UTC).toLocalDate.toString
+
+  private def scalar(v: ujson.Value): String = v match
+    case ujson.Str(s)  => s
+    case ujson.Num(n)  => if n == n.floor then n.toLong.toString else n.toString
+    case ujson.Bool(b) => b.toString
+    case other         => ujson.write(other)
+
+  /** The stderr warning naming every setting we picked for the user and what
+    * else was available, so that a disappointing clip is explicable rather than
+    * mysterious — and so the cost of the alternatives is visible before the
+    * next run. */
+  def defaults(modelId: String, chosen: List[Chosen]): String =
+    val out = List.newBuilder[String]
+    out += s"warning: filling in unset quality settings with the cheapest $modelId offers,"
+    out += "         so expect the lowest quality this model produces."
+    chosen.foreach { c =>
+      out += "  " + row(c.field, c.value.padTo(10, ' ') + s"(of ${c.offered.mkString(", ")})")
+    }
+    out += "         Override with --duration / --resolution / --aspect-ratio /"
+    out += "         --generate-audio / --no-generate-audio."
+    out.result().mkString("\n")
+
+  /** What we are forwarding, under which provider slug, and whether the catalog
+    * recognises it. OpenRouter drops options keyed to a provider it did not
+    * route to without complaint, so showing the slug is the only way an
+    * ignored parameter is distinguishable from an accepted one. */
+  def passthrough(tags: List[String], params: List[Param], unlisted: List[String]): String =
+    val out = List.newBuilder[String]
+    out += s"passthrough: forwarding to provider ${tags.mkString(", ")}"
+    params.foreach(p => out += "  " + row(p.key, ujson.write(p.value)))
+    if unlisted.nonEmpty then
+      out += s"warning: ${unlisted.mkString(", ")} not in this model's allowed_passthrough_parameters;"
+      out += "         sending anyway, but OpenRouter may drop it without saying so."
+    out.result().mkString("\n")
+
+  /** Fields the wire sent that our types discard.
+    *
+    * Diagnostic rather than result, so this goes to stderr: it describes our
+    * parser, not the job or the catalog, and a redirected record should not
+    * collect it. */
+  def unmodeled(scope: String, keys: List[String]): String =
+    s"warning: ${keys.size} field(s) not modelled by $scope, and so discarded: " +
+      keys.mkString(", ") + "\n         add them to the case class to keep them."
+
+  /** Aligned with the job rows above it, since it is printed just beneath them. */
+  def saved(path: os.Path): String = row("Saved", path.toString)
+
+  /** Everything we know about a job, including where to fetch the video. */
+  def job(j: VideoJob): String =
+    val out = List.newBuilder[String]
+    out += row("Job", j.id)
+    out += row("Status", j.status)
+    j.model.foreach(m => out += row("Model", m))
+    j.generation_id.foreach(g => out += row("Generation", g))
+    j.usage.flatMap(_.cost).foreach(c => out += row("Cost", "$" + f"$c%.4f"))
+    j.usage.flatMap(_.is_byok).filter(identity).foreach(_ => out += row("BYOK", "yes"))
+    j.polling_url.foreach(u => out += row("Poll", u))
+
+    j.contentUrls match
+      case Nil => ()
+      case one :: Nil => out += row("Video", one)
+      case many => many.zipWithIndex.foreach { case (u, i) => out += row(s"Video[$i]", u) }
+
+    j.error.foreach(e => out += row("Error", scalar(e)))
+
+    if j.status == "completed" && j.contentUrls.isEmpty then
+      out += row("Note", "job completed but reported no content URLs")
+
+    out.result().mkString("\n")
+
+  /** One block per model, with everything you need to build a valid request.
+    * `filter` is only used to explain an empty result: nothing matching the
+    * text the user typed is a different situation from nothing being offered. */
+  def models(ms: List[VideoModel], filter: Option[String] = None): String =
+    if ms.isEmpty then
+      filter.fold("No video generation models available.")(f =>
+        s"No video generation models match '$f'."
+      )
+    else
+      ms.sortBy(_.id)
+        .map { m =>
+          val out = List.newBuilder[String]
+          out += m.name.filter(_ != m.id).fold(m.id)(n => s"${m.id}  ($n)")
+
+          def list(label: String, values: Option[List[Any]], suffix: String = ""): Unit =
+            values.filter(_.nonEmpty).foreach { vs =>
+              out += "  " + row(label, vs.mkString(", ") + suffix)
+            }
+
+          def field(label: String, value: Option[String]): Unit =
+            value.filter(_.nonEmpty).foreach(v => out += "  " + row(label, v))
+
+          // Every key the catalog sends is shown. A field absent or null for a
+          // model prints nothing rather than an empty row, so the block stays a
+          // description of that model rather than a form with blanks.
+          field("slug", m.canonical_slug.filter(_ != m.id))
+          field("released", m.created.map(date))
+          list("durations", m.supported_durations, " s")
+          list("resolutions", m.supported_resolutions)
+          list("ratios", m.supported_aspect_ratios)
+          list("sizes", m.supported_sizes)
+          list("frames", m.supported_frame_images)
+          field("audio", m.generate_audio.map(yesNo))
+          field("seed", m.seed.map(yesNo))
+          field("creativity", m.creativity.map(compact))
+          field("upscale", m.upscale_factor.map(compact))
+          field("huggingface", m.hugging_face_id)
+
+          m.pricing_skus.filter(_.nonEmpty).foreach { p =>
+            val pricing = p.toList.sortBy(_._1).map((k, v) => s"$k=${scalar(v)}").mkString(", ")
+            out += "  " + row("pricing", pricing)
+          }
+
+          list("passthrough", m.allowed_passthrough_parameters)
+
+          m.description.map(_.trim).filter(_.nonEmpty).foreach { d =>
+            val oneLine = d.replaceAll("\\s+", " ")
+            val clipped = if oneLine.length > 160 then oneLine.take(157) + "..." else oneLine
+            out += "  " + row("about", clipped)
+          }
+
+          out.result().mkString("\n")
+        }
+        .mkString("\n\n")
