@@ -96,12 +96,27 @@ object OpenRouter:
       timeout: Duration = DefaultPollTimeout
   )(onPoll: VideoJob => UIO[Unit]): Task[T[VideoJob]] =
     val jw = summon[JsonWrapper[T]]
-    def loop(current: T[VideoJob]): Task[T[VideoJob]] =
-      if jw.value(current).isTerminal then ZIO.succeed(current)
-      else ZIO.sleep(every) *> _check[T](apiKey, jw.value(current).id).tap(r => onPoll(jw.value(r))).flatMap(loop)
-    loop(job).timeoutFail(
-      new RuntimeException(s"job ${jw.value(job).id} did not finish within ${timeout.render}")
-    )(timeout)
+    val jobId = jw.value(job).id
+
+    // `repeat` yields the *schedule's* output, not the effect's, so the
+    // schedule has to be one whose output is its input. `Schedule.spaced`
+    // emits a repetition count, which is why spacing alone will not typecheck
+    // here; `recurUntil` is `Schedule[Any, A, A]`, and `addDelay` spaces it.
+    // The delay falls between repetitions, so the first poll is immediate and
+    // no delay is served after the terminal one.
+    val untilTerminal =
+      Schedule.recurUntil[T[VideoJob]](r => jw.value(r).isTerminal).addDelay(_ => every)
+
+    // A job that is already finished costs no request, and the caller gets back
+    // the very value it passed rather than a re-fetched equivalent.
+    if jw.value(job).isTerminal then ZIO.succeed(job)
+    else
+      _check[T](apiKey, jobId)
+        .tap(r => onPoll(jw.value(r)))
+        .repeat(untilTerminal)
+        .timeoutFail(
+          new RuntimeException(s"job $jobId did not finish within ${timeout.render}")
+        )(timeout)
 
   /** GET /videos/models — capabilities and pricing for every video model.
     *
