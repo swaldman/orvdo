@@ -72,6 +72,30 @@ object Render:
 
   def receiptAt(path: os.Path): String = row("Receipt", path.toString)
 
+  /** `clip.mp4` beside index 2 becomes `clip-2.mp4`, in the same directory. */
+  private def sibling(saved: os.Path, index: Int): os.Path =
+    val suffix = if saved.ext.isEmpty then "" else "." + saved.ext
+    saved / os.up / s"${saved.baseName}-$index$suffix"
+
+  /** The content URLs `--download-as` had no name for, with a command that
+    * fetches them.
+    *
+    * A bare list would not be much use. Content URLs are "unsigned" only in
+    * that they carry no signature of their own — they still require the bearer
+    * token, so pasting one into a browser earns a 401. The key is emitted as a
+    * shell variable rather than interpolated, so a warning can be pasted into
+    * an issue without leaking it. */
+  def unsaved(j: VideoJob, saved: os.Path): String =
+    val urls = j.contentUrls
+    val out = List.newBuilder[String]
+    out += s"warning: job ${j.id} returned ${urls.size} videos; only index 0 was saved to"
+    out += s"         $saved. The rest need the same bearer token:"
+    urls.zipWithIndex.drop(1).foreach { (url, i) =>
+      out += "  curl -H \"Authorization: Bearer $OPENROUTER_API_KEY\" -o \"" +
+        sibling(saved, i) + "\" \"" + url + "\""
+    }
+    out.result().mkString("\n")
+
   /** A standalone record of how a video came to exist, meant to outlive the
     * shell that made it.
     *

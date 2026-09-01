@@ -218,6 +218,19 @@ completed has a URL to fetch right now. On both, `--force` requires
 alone and the command exits non-zero — but the job details, including the
 download URL, are printed first either way.
 
+If a job returns more than one video, `--download-as` saves index 0 and warns
+about the rest on stderr, with a command for each that will fetch it:
+
+```
+warning: job B7pFInVv… returned 3 videos; only index 0 was saved to
+         /Users/you/clips/duck.mp4. The rest need the same bearer token:
+  curl -H "Authorization: Bearer $OPENROUTER_API_KEY" -o "/Users/you/clips/duck-1.mp4" "https://…?index=1"
+```
+
+Content URLs are unsigned but still require the token, so a bare URL in a
+browser gets a 401 — hence the full command. Your key is referenced as a shell
+variable, not printed.
+
 Progress lines go to stderr; job records and model listings go to stdout, so
 `./mill run check --job-id abc123 > job.txt` captures just the record.
 

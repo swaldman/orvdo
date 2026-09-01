@@ -558,8 +558,15 @@ object Main extends ZIOAppDefault:
       attempted <- downloadFor(apiKey, out.downloadAs, out.force, job.value).either
       _ <- printJob(job, out.json)
       _ <- attempted match
-        case Right(Some(path)) => Console.printLine(Render.saved(path))
-        case _                 => ZIO.unit
+        case Right(Some(path)) =>
+          // `downloadFor` takes `firstContentUrl`, so a job with several
+          // outputs loses all but index 0 unless we say so. Stderr, since the
+          // record on stdout already lists every URL.
+          Console.printLine(Render.saved(path)) *>
+            progress(Render.unsaved(job.value, path))
+              .when(job.value.contentUrls.sizeIs > 1)
+              .unit
+        case _ => ZIO.unit
       // A receipt is written whether or not the download worked, and records
       // the digest only when there is a file to digest. Its own failure is
       // captured for the same reason the download's is: the record has been
