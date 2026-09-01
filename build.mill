@@ -1,0 +1,44 @@
+//| mill-version: 1.1.8
+//| mill-jvm-version: 21
+//+---------------------------------------------------------------
+
+package build
+
+import mill.*, scalalib.*, publish.*
+
+object `package` extends ScalaModule, SonatypeCentralPublishModule:
+  override def scalaVersion = "3.3.8"
+
+  override def scalacOptions = Task:
+    super.scalacOptions() :+ "-deprecation"
+
+  override def mvnDeps = Task:
+    super.mvnDeps() ++
+    Seq(
+      mvn"com.lihaoyi::requests:0.9.3",
+      mvn"com.lihaoyi::upickle:4.4.3",
+      mvn"com.lihaoyi::os-lib:0.11.8",
+      mvn"dev.zio::zio:2.1.26",
+      mvn"com.monovore::decline:2.6.2"
+    )
+
+  override def artifactName = "orvdo"
+
+  override def publishVersion = "0.0.1-SNAPSHOT"
+
+  override def pomSettings =
+    PomSettings(
+      description = "Utilities for working with openrouter.com's video generation APIs.",
+      organization = "com.mchange",
+      url = "https://github.com/swaldman/orvdo",
+      licenses = Seq(License.`Apache-2.0`),
+      versionControl = VersionControl.github("swaldman", "orvdo"),
+      developers = Seq(
+        Developer("swaldman", "Steve Waldman", "https://github.com/swaldman")
+      )
+    )
+
+  val MchangeStaging = "/Users/swaldman/development/gitproj/www.mchange.com/repository"
+
+  def publishMchange() = this.publishM2Local( MchangeStaging )
+  
