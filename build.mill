@@ -24,7 +24,7 @@ object `package` extends ScalaModule, SonatypeCentralPublishModule:
 
   override def artifactName = "orvdo"
 
-  override def publishVersion = "0.0.1-SNAPSHOT"
+  override def publishVersion = "0.0.1"
 
   override def pomSettings =
     PomSettings(

@@ -51,7 +51,7 @@ cp out/script/script.dest/orvdo ~/bin/orvdo
 #!/usr/bin/env -S scala-cli shebang
 
 //> using scala "3.3.8"
-//> using dep "com.mchange::orvdo:0.0.1-SNAPSHOT"
+//> using dep "com.mchange::orvdo:0.0.1"
 
 com.mchange.orvdo.Main.main(args)
 ```
@@ -62,11 +62,11 @@ was published. It needs [scala-cli](https://scala-cli.virtuslab.org/) on your
 quick. Exit codes and the stdout/stderr split behave exactly as they do with the
 jar.
 
-The trade-off is that the script only works where its dependency resolves.
-While the version is a `-SNAPSHOT`, that means a machine where you have run
-`./mill publishLocal` or `./mill publishMchange` — a snapshot is not on Maven
-Central. Until a release is published, prefer the assembly jar for anyone
-else's machine, or add a `//> using repository` line to
+The trade-off is that the script only works where its dependency resolves. Once
+a version is published to Maven Central that is anywhere; until then, or for a
+version published only with `./mill publishLocal` or `./mill publishMchange`, it
+is a machine that has it locally. For a version that is not on Central, prefer
+the assembly jar, or add a `//> using repository` line to
 `script/orvdo.template` pointing at wherever you publish.
 
 ## Setup
