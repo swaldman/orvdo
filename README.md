@@ -4,6 +4,138 @@ A small CLI and library over OpenRouter's asynchronous video generation API.
 upickle for JSON, requests-scala for HTTP, ZIO for the operations, decline for
 the command line, os-lib for the filesystem.
 
+## Quickstart
+
+### Prerequisites
+
+You should have [scala-cli](https://scala-cli.virtuslab.org/) [installed](https://scala-cli.virtuslab.org/install) on your machine.
+
+You really should.
+
+### Installation
+
+Download the `orvdo` script.
+
+You'll find it as a downloadable binary in the latest release.
+Make sure that it's executable:
+
+```plaintext
+chmod +x orvdo
+```
+
+and place it in a directory on your `PATH`.
+
+### List available models
+
+```plaintext
+orvdo list-models -s
+```
+
+the `-s` is short for `--short`. If you leave it out, you'll see... a lot.
+
+```plaintext
+% orvdo list-models -s
+alibaba/happyhorse-1.0  (Alibaba: HappyHorse 1.0)
+alibaba/happyhorse-1.1  (Alibaba: HappyHorse 1.1)
+alibaba/wan-2.6  (Alibaba: Wan 2.6)
+alibaba/wan-2.7  (Alibaba: Wan 2.7)
+alibaba/wan-3.0  (Alibaba: Wan 3.0)
+alibaba/wan-3.0-prime  (Alibaba: Wan 3.0 Prime)
+black-forest-labs/flux-3-video  (Black Forest Labs: FLUX.3 Video)
+black-forest-labs/flux-video-upscale  (Black Forest Labs: FLUX Video Upscale)
+bytedance/seedance-1-5-pro  (ByteDance: Seedance 1.5 Pro)
+bytedance/seedance-2.0  (ByteDance: Seedance 2.0)
+bytedance/seedance-2.0-fast  (ByteDance: Seedance 2.0 Fast)
+bytedance/seedance-2.0-mini  (ByteDance: Seedance 2.0 Mini)
+bytedance/seedance-2.5  (ByteDance: Seedance 2.5)
+google/veo-3.1  (Google: Veo 3.1)
+google/veo-3.1-fast  (Google: Veo 3.1 Fast)
+google/veo-3.1-lite  (Google: Veo 3.1 Lite)
+heygen/avatar-iv  (HeyGen: Avatar IV)
+kwaivgi/kling-v3.0-pro  (Kling: Video v3.0 Pro)
+kwaivgi/kling-v3.0-std  (Kling: Video v3.0 Standard)
+kwaivgi/kling-video-o1  (Kling: Video O1)
+minimax/hailuo-2.3  (MiniMax: Hailuo 2.3)
+minimax/hailuo-3  (MiniMax: H3)
+minimax/hailuo-3-max  (MiniMax: H3 Max)
+openai/sora-2-pro  (OpenAI: Sora 2 Pro)
+runway/aleph-2  (Runway: Aleph 2.0)
+runway/gen-4.5  (Runway: Gen-4.5)
+x-ai/grok-imagine-video  (SpaceXAI: Grok Imagine Video)
+x-ai/grok-imagine-video-1.5  (SpaceXAI: Grok Imagine Video 1.5)
+```
+
+Pick a model you like, and filter on it to learn about it. (Leave off the -s, you want all the info!)
+
+```plaintext
+% orvdo list-models -f bytedance/seedance-2.0-mini
+bytedance/seedance-2.0-mini  (ByteDance: Seedance 2.0 Mini)
+  slug        bytedance/seedance-2.0-mini-20260811
+  released    2026-08-12
+  durations   4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 s
+  resolutions 480p, 720p
+  ratios      1:1, 3:4, 9:16, 4:3, 16:9, 21:9, 9:21
+  sizes       480x480, 480x640, 480x854, 640x480, 854x480, 1120x480, 720x720, 720x960, 720x1280, 720x1680, 960x720, 1280x720, 1680x720
+  frames      first_frame, last_frame
+  audio       yes
+  seed        yes
+  pricing     video_tokens=0.0000035, video_tokens_with_video_input=0.0000021, video_tokens_without_audio=0.0000035
+  passthrough watermark, req_key, return_last_frame
+  about       Seedance 2.0 Mini is a video generation model from ByteDance. It supports text-to-video, image-to-video with first and last frame control, and multimodal ref...
+```
+
+For more on the `list-models` subcommand, see the help:
+
+```plaintext
+orvdo list-models --help
+```
+
+### Run a model
+
+In order to run a model, `orvdo` will require an API key. You gotta pay to generate video on [openrouter](https://openrouter.ai), alas.
+
+Once you have it, export it into your environment as OPENROUTER_API_KEY:
+
+```plainext
+export OPENROUTER_API_KEY=<your-secret-key-here>
+```
+
+Then it's just as simple as...
+
+```plaintext
+% orvdo run --model bytedance/seedance-2.0-mini --prompt "An android dreams electric sheep."
+warning: filling in unset quality settings with the cheapest bytedance/seedance-2.0-mini offers,
+         so expect the lowest quality this model produces.
+  duration    4 s       (of 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
+  resolution  480p      (of 480p, 720p)
+  ratio       1:1       (of 1:1, 3:4, 9:16, 4:3, 16:9, 21:9, 9:21)
+  audio       off       (of on, off)
+         Override with --duration / --resolution / --aspect-ratio /
+         --generate-audio / --no-generate-audio.
+submitted i3cl3HBsrhssEAMtNUks, waiting for completion...
+  pending
+  pending
+  pending
+  pending
+  pending
+  pending
+  pending
+  completed
+Job         i3cl3HBsrhssEAMtNUks
+Status      completed
+Generation  gen-vid-1788368496-uvBwUzVzqCFqPD2lXk3D
+Cost        $0.0543
+Poll        https://openrouter.ai/api/v1/videos/i3cl3HBsrhssEAMtNUks
+Video       https://openrouter.ai/api/v1/videos/i3cl3HBsrhssEAMtNUks/content?index=0
+Saved       /Users/swaldman/tmp/video_20260902T170327Z_i3cl3HBsrhssEAMtNUks.mp4
+Receipt     /Users/swaldman/tmp/video_20260902T170327Z_i3cl3HBsrhssEAMtNUks.mp4.receipt
+```
+
+Check out your new mp4 file, `video_20260902T170327Z_i3cl3HBsrhssEAMtNUks.mp4`:
+
+
+
+
 ## Build
 
 Mill, with the wrapper checked in — no global install needed:
