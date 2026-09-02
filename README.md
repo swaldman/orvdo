@@ -96,7 +96,7 @@ In order to run a model, `orvdo` will require an API key. You gotta pay to gener
 
 Once you have it, export it into your environment as OPENROUTER_API_KEY:
 
-```plainext
+```plaintext
 export OPENROUTER_API_KEY=<your-secret-key-here>
 ```
 
@@ -163,74 +163,6 @@ orvdo submit --help
 
 Or, just keep reading below!
 
-## Build
-
-```plaintext
-orvdo submit --help
-```
-Mill, with the wrapper checked in — no global install needed:
-
-```
-./mill compile
-./mill run <subcommand> [options]     # the CLI, from the build
-./mill assembly                       # a self-executing jar
-./mill script                         # a small launcher script (see below)
-./mill publishLocal                   # into ~/.ivy2/local
-./mill publishMchange                 # into the mchange staging repository
-```
-
-Tests are utest, and hermetic — no API key, no network:
-
-```
-./mill test
-```
-
-`./mill run` is convenient while developing, but it decorates any non-zero exit
-with a `Subprocess failed` line of its own. For actual use, `./mill assembly`
-writes a launcher to `out/assembly.dest/out.jar` that runs directly and exits
-with the CLI's own status:
-
-```
-out/assembly.dest/out.jar list-models -f veo
-```
-
-The examples below are written as `./mill run …`; substitute the jar freely.
-
-## Installing
-
-`./mill assembly` produces a single self-contained jar, which needs only a JVM.
-Copy `out/assembly.dest/out.jar` somewhere on your `PATH` as `orvdo`.
-
-`./mill script` produces a smaller alternative: a launcher that resolves the
-library from a repository at run time rather than bundling it.
-
-```
-./mill script                 # writes out/script/script.dest/orvdo
-cp out/script/script.dest/orvdo ~/bin/orvdo
-```
-
-```
-#!/usr/bin/env -S scala-cli shebang
-
-//> using scala "3.3.8"
-//> using dep "com.mchange::orvdo:0.0.1"
-
-com.mchange.orvdo.Main.main(args)
-```
-
-Both versions are filled in from the build, so the script cannot drift from what
-was published. It needs [scala-cli](https://scala-cli.virtuslab.org/) on your
-`PATH`; the first run resolves and caches the dependency, and later runs are
-quick. Exit codes and the stdout/stderr split behave exactly as they do with the
-jar.
-
-The trade-off is that the script only works where its dependency resolves. Once
-a version is published to Maven Central that is anywhere; until then, or for a
-version published only with `./mill publishLocal` or `./mill publishMchange`, it
-is a machine that has it locally. For a version that is not on Central, prefer
-the assembly jar, or add a `//> using repository` line to
-`script/orvdo.template` pointing at wherever you publish.
-
 ## Setup
 
 ```
@@ -247,17 +179,21 @@ be set.
 
 ## Usage
 
+The examples below are written as `orvdo …`, as they would be typed with the
+script or the jar on your `PATH`. From a source checkout without either,
+`./mill run …` is the equivalent.
+
 ```
-./mill run --help
-./mill run list-models
-./mill run check --job-id abc123
+orvdo --help
+orvdo list-models
+orvdo check --job-id abc123
 ```
 
 The full listing runs to a couple of dozen models and several hundred lines, so
 `--short` (`-s`) gives one line per model — the id and the name, nothing else:
 
 ```
-./mill run list-models --short
+orvdo list-models --short
 ```
 
 ```
@@ -272,8 +208,8 @@ keeps only models whose id or name contains the given text, case-insensitively,
 and combines with `--short`:
 
 ```
-./mill run list-models -f veo        # google/veo-3.1, -fast, -lite
-./mill run list-models -f spacexai   # matches on the name, not the id
+orvdo list-models -f veo        # google/veo-3.1, -fast, -lite
+orvdo list-models -f spacexai   # matches on the name, not the id
 ```
 
 Each entry shows every field the catalog carries for that model; anything null
@@ -301,7 +237,7 @@ what they cost — pricing is the `pricing` row's business.
 Most of the time you want one command:
 
 ```
-./mill run run -m google/veo-3.1 -p "a duck wearing a tiny hat"
+orvdo run -m google/veo-3.1 -p "a duck wearing a tiny hat"
 ```
 
 `run` submits, waits for the render, saves the video under a name derived from
@@ -316,7 +252,7 @@ forget without waiting, to name the file yourself, or to overwrite with
 Submit and print the job record immediately:
 
 ```
-./mill run submit -m google/veo-3.1 -p "a duck wearing a tiny hat" -d 8 -r 1080p
+orvdo submit -m google/veo-3.1 -p "a duck wearing a tiny hat" -d 8 -r 1080p
 ```
 
 The prompt can come from the command line with `--prompt` (`-p`), from a file
@@ -324,7 +260,7 @@ with `--prompt-file` (`-f`), or from both — in which case the file leads and t
 argument follows after a blank line:
 
 ```
-./mill run submit -m google/veo-3.1 -f house-style.txt -p "and at dusk"
+orvdo submit -m google/veo-3.1 -f house-style.txt -p "and at dusk"
 ```
 
 That combination is the useful one: keep the considered part of a prompt in a
@@ -348,7 +284,7 @@ Matching ignores case and the catalog's spelling is what goes on the wire, so
 Submit, poll to completion, and save the result:
 
 ```
-./mill run submit \
+orvdo submit \
   -m google/veo-3.1 \
   -f prompt.txt \
   -d 8 \
@@ -388,8 +324,8 @@ per-second price where it is billed separately — Veo 3.1 charges
 `duration_seconds_with_audio` at $0.40 against $0.20 without:
 
 ```
-./mill run submit -m google/veo-3.1 -f prompt.txt --generate-audio
-./mill run submit -m google/veo-3.1 -f prompt.txt --no-generate-audio
+orvdo submit -m google/veo-3.1 -f prompt.txt --generate-audio
+orvdo submit -m google/veo-3.1 -f prompt.txt --no-generate-audio
 ```
 
 Either flag settles the question and drops the `audio` row;
@@ -404,7 +340,7 @@ there is no surprise to guard against.
 Pin the opening or closing frame, or supply style references:
 
 ```
-./mill run submit -m google/veo-3.1 -f prompt.txt \
+orvdo submit -m google/veo-3.1 -f prompt.txt \
   --first-frame https://example.com/open.png \
   --last-frame  https://example.com/close.png \
   --reference   https://example.com/style.png
@@ -429,7 +365,7 @@ Model-specific options go through `--param key=value` (`-P`), repeatable. The
 `passthrough` row of `list-models` shows what a model accepts:
 
 ```
-./mill run submit -m bytedance/seedance-2.0-mini -f prompt.txt \
+orvdo submit -m bytedance/seedance-2.0-mini -f prompt.txt \
   -P return_last_frame=true --await --json
 ```
 
@@ -457,7 +393,7 @@ sent, with a warning that it may be silently dropped.
 ask for at submit time can be picked up afterwards:
 
 ```
-./mill run check --job-id abc123 --await --download-as out/clip.mp4
+orvdo check --job-id abc123 --await --download-as out/clip.mp4
 ```
 
 That waits if the job is still running, fetches it if it is not, and saves
@@ -470,7 +406,7 @@ completed has a URL to fetch right now. On both, `--force` requires
 media type the server declares:
 
 ```
-./mill run submit -m google/veo-3.1 -f prompt.txt --await --download
+orvdo submit -m google/veo-3.1 -f prompt.txt --await --download
 ```
 
 ```
@@ -527,7 +463,7 @@ printed before any of this either way.
 Any content URL can be fetched on its own with `download`:
 
 ```
-./mill run download --url "https://…/videos/abc123/content?index=0" --as out/clip.mp4
+orvdo download --url "https://…/videos/abc123/content?index=0" --as out/clip.mp4
 ```
 
 `--as` and `--download-as` are synonyms and exactly one is required — the short
@@ -548,7 +484,7 @@ warning: job B7pFInVv… returned 3 videos; only index 0 was saved to
 ```
 
 Progress lines go to stderr; job records and model listings go to stdout, so
-`./mill run check --job-id abc123 > job.txt` captures just the record.
+`orvdo check --job-id abc123 > job.txt` captures just the record.
 
 ## Receipts
 
@@ -556,7 +492,7 @@ How a video was made is easy to lose once the shell scrollback is gone.
 `--receipt` writes it down:
 
 ```
-./mill run submit -m google/veo-3.1 -f prompt.txt \
+orvdo submit -m google/veo-3.1 -f prompt.txt \
   --await --download-as out/clip.mp4 --receipt
 ```
 
@@ -605,6 +541,28 @@ with slashes in the model id replaced so it stays one filename.
 no prompt — a job id says nothing about how it was asked for. `submit` without
 `--await` still writes one, recording the model and prompt while they are known.
 
+## Seeing the whole response
+
+`submit` and `check` take `--json`, which prints the response OpenRouter
+actually sent rather than the formatted rows:
+
+```
+orvdo check --job-id abc123 --json
+```
+
+This matters because uPickle discards keys the wire types do not declare, which
+is silent by nature. So anything discarded — from a job response or from the
+catalog — is announced on stderr:
+
+```
+warning: 1 field(s) not modelled by VideoJob, and so discarded: last_frame_url
+         add them to the case class to keep them.
+```
+
+The warning is on stderr and the record on stdout, so `check --job-id abc123 >
+job.txt` still captures just the record. It fires under `--json` too, where it
+names what the raw output would only imply.
+
 ## Using it as a library
 
 `com.mchange.orvdo.OpenRouter` is the whole API, and every operation comes in
@@ -629,27 +587,74 @@ non-raw path discards the JSON rather than wrapping and unwrapping it.
 Nothing below the CLI reads the environment — `apiKey` is a parameter
 throughout.
 
-## Seeing the whole response
+## Building from source
 
-`submit` and `check` take `--json`, which prints the response OpenRouter
-actually sent rather than the formatted rows:
+Most people want the `orvdo` script from the [latest
+release](https://github.com/swaldman/orvdo/releases/latest) — see the Quickstart
+above. This section is for building it yourself.
 
-```
-./mill run check --job-id abc123 --json
-```
-
-This matters because uPickle discards keys the wire types do not declare, which
-is silent by nature. So anything discarded — from a job response or from the
-catalog — is announced on stderr:
+Mill, with the wrapper checked in — no global install needed:
 
 ```
-warning: 1 field(s) not modelled by VideoJob, and so discarded: last_frame_url
-         add them to the case class to keep them.
+./mill compile
+./mill run <subcommand> [options]     # the CLI, from the build
+./mill assembly                       # a self-executing jar
+./mill script                         # a small launcher script
+./mill publishLocal                   # into ~/.ivy2/local
+./mill publishMchange                 # into the mchange staging repository
 ```
 
-The warning is on stderr and the record on stdout, so `check --job-id abc123 >
-job.txt` still captures just the record. It fires under `--json` too, where it
-names what the raw output would only imply.
+Tests are utest, and hermetic — no API key, no network:
+
+```
+./mill test
+```
+
+`./mill run` is convenient while developing, but it decorates any non-zero exit
+with a `Subprocess failed` line of its own, so it is not how you would install
+the tool.
+
+### A self-contained jar
+
+`./mill assembly` produces a single jar that needs only a JVM, runs directly and
+exits with the CLI's own status. Copy it somewhere on your `PATH` as `orvdo`:
+
+```
+./mill assembly
+cp out/assembly.dest/out.jar ~/bin/orvdo
+```
+
+### A launcher script
+
+`./mill script` produces a smaller alternative — the same thing the releases
+carry: a launcher that resolves the library at run time rather than bundling it.
+
+```
+./mill script                 # writes out/script/script.dest/orvdo
+cp out/script/script.dest/orvdo ~/bin/orvdo
+```
+
+```
+#!/usr/bin/env -S scala-cli shebang
+
+//> using scala "3.3.8"
+//> using dep "com.mchange::orvdo:0.0.1"
+
+com.mchange.orvdo.Main.main(args)
+```
+
+Both versions are filled in from the build, so the script cannot drift from what
+was published. It needs [scala-cli](https://scala-cli.virtuslab.org/) on your
+`PATH`; the first run resolves and caches the dependency, and later runs are
+quick. Exit codes and the stdout/stderr split behave exactly as they do with the
+jar.
+
+The trade-off is that the script only works where its dependency resolves. Once
+a version is published to Maven Central that is anywhere; until then, or for a
+version published only with `./mill publishLocal` or `./mill publishMchange`, it
+is a machine that has it locally. For a version that is not on Central, prefer
+the assembly jar, or add a `//> using repository` line to
+`script/orvdo.template` pointing at wherever you publish.
 
 ## Notes
 
