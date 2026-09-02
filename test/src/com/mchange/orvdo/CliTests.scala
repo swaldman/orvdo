@@ -14,6 +14,21 @@ object CliTests extends TestSuite:
 
   val tests = Tests:
 
+    test("a prompt is required, in one form or the other"):
+      val e = errorOf("submit", "-m", "google/veo-3.1")
+      assert(e.contains("a prompt is required"))
+
+    test("--prompt alone is enough"):
+      assert(submitOf("submit", "-m", "google/veo-3.1", "-p", "a duck").prompt == Some("a duck"))
+
+    test("--prompt-file alone is enough, and -f is its short form"):
+      val s = submitOf("submit", "-m", "google/veo-3.1", "-f", "p.txt")
+      assert(s.promptFile.isDefined && s.prompt.isEmpty)
+
+    test("both may be given"):
+      val s = submitOf("submit", "-m", "google/veo-3.1", "-f", "p.txt", "-p", "at dusk")
+      assert(s.promptFile.isDefined && s.prompt == Some("at dusk"))
+
     test("a missing key is a usage error, not a stack trace"):
       val errs = Cli.command.parse(Seq("list-models"), Map.empty).left.toOption.get.errors
       assert(errs.exists(_.contains(Key)))

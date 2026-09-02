@@ -81,7 +81,8 @@ enum Cmd:
       resolution: Option[String],
       aspectRatio: Option[String],
       generateAudio: Option[Boolean],
-      promptFile: os.Path,
+      promptFile: Option[os.Path],
+      prompt: Option[String],
       firstFrame: Option[ImageUrl],
       lastFrame: Option[ImageUrl],
       references: List[ImageUrl],
@@ -339,11 +340,23 @@ object Cli:
         )
         .orNone,
       generateAudio,
-      Opts.option[os.Path](
-        "prompt-file",
-        "Plain-text file whose contents are used as the prompt.",
-        short = "p"
-      ),
+      Opts
+        .option[os.Path](
+          "prompt-file",
+          "Plain-text file whose contents are used as the prompt.",
+          short = "f",
+          metavar = "path"
+        )
+        .orNone,
+      Opts
+        .option[String](
+          "prompt",
+          "The prompt itself. May be combined with --prompt-file, in which case " +
+            "the file leads and this follows, separated by a blank line.",
+          short = "p",
+          metavar = "text"
+        )
+        .orNone,
       Opts
         .option[ImageUrl](
           "first-frame",
@@ -376,7 +389,11 @@ object Cli:
   private val submit: Opts[Cmd] =
     Opts.subcommand("submit", "Submit a text-to-video generation job.")(
       submitOpts.mapValidated { s =>
-        if s.download != DownloadTo.No && !s.await then
+        if s.promptFile.isEmpty && s.prompt.isEmpty then
+          Validated.invalidNel(
+            "a prompt is required: give --prompt, --prompt-file, or both."
+          )
+        else if s.download != DownloadTo.No && !s.await then
           Validated.invalidNel(
             "--download and --download-as require --await; there is no video to save until the job finishes."
           )
@@ -439,7 +456,7 @@ object Main extends ZIOAppDefault:
 
     case s: Cmd.Submit =>
       for
-        prompt <- readPrompt(s.promptFile)
+        prompt <- readPrompt(s.promptFile, s.prompt)
         model <- findModel(s.apiKey, s.model)
         // Shadowing is deliberate: nothing below can reach the un-canonicalised
         // settings by accident.
@@ -632,13 +649,29 @@ object Main extends ZIOAppDefault:
     )
     (request, chosen.result())
 
-  private def readPrompt(path: os.Path): Task[String] =
+  private def readPromptFile(path: os.Path): Task[String] =
     for
       exists <- ZIO.attemptBlocking(os.exists(path) && os.isFile(path))
       _ <- ZIO.fail(new IllegalArgumentException(s"no such prompt file: $path")).unless(exists)
       text <- ZIO.attemptBlocking(os.read(path)).map(_.trim)
       _ <- ZIO.fail(new IllegalArgumentException(s"prompt file is empty: $path")).when(text.isEmpty)
     yield text
+
+  /** The prompt actually submitted.
+    *
+    * With both sources the file leads and the argument follows, separated by a
+    * blank line: the file is the considered part, worth keeping under version
+    * control, and the argument is the variation being tried on top of it. Only
+    * this combined text is recorded in a receipt — the split is a convenience
+    * of the command line, not a property of the render. */
+  private[orvdo] def readPrompt(file: Option[os.Path], inline: Option[String]): Task[String] =
+    for
+      fromFile <- ZIO.foreach(file)(readPromptFile)
+      combined = (fromFile.toList ++ inline.toList).mkString("\n\n")
+      _ <- ZIO
+        .fail(new IllegalArgumentException("the prompt is empty"))
+        .when(combined.trim.isEmpty)
+    yield combined
 
   /** Poll to a terminal state, then attempt the download if one was asked for.
     * The full job information is printed either way, download or no download. */

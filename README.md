@@ -121,8 +121,21 @@ what they cost — pricing is the `pricing` row's business.
 Submit and print the job record immediately:
 
 ```
-./mill run submit -m google/veo-3.1 -p prompt.txt -d 8 -r 1080p -a 16:9
+./mill run submit -m google/veo-3.1 -p "a duck wearing a tiny hat" -d 8 -r 1080p
 ```
+
+The prompt can come from the command line with `--prompt` (`-p`), from a file
+with `--prompt-file` (`-f`), or from both — in which case the file leads and the
+argument follows after a blank line:
+
+```
+./mill run submit -m google/veo-3.1 -f house-style.txt -p "and at dusk"
+```
+
+That combination is the useful one: keep the considered part of a prompt in a
+file under version control, and vary it from the shell. Only the combined text
+is submitted, and only the combined text appears in a receipt — the split is a
+convenience of the command line, not a property of the render.
 
 `--duration`, `--resolution` and `--aspect-ratio` are checked against the
 model's catalog entry before anything is sent, so a value the model does not
@@ -142,7 +155,7 @@ Submit, poll to completion, and save the result:
 ```
 ./mill run submit \
   -m google/veo-3.1 \
-  -p prompt.txt \
+  -f prompt.txt \
   -d 8 \
   --await \
   --download-as out/clip.mp4 \
@@ -180,8 +193,8 @@ per-second price where it is billed separately — Veo 3.1 charges
 `duration_seconds_with_audio` at $0.40 against $0.20 without:
 
 ```
-./mill run submit -m google/veo-3.1 -p prompt.txt --generate-audio
-./mill run submit -m google/veo-3.1 -p prompt.txt --no-generate-audio
+./mill run submit -m google/veo-3.1 -f prompt.txt --generate-audio
+./mill run submit -m google/veo-3.1 -f prompt.txt --no-generate-audio
 ```
 
 Either flag settles the question and drops the `audio` row;
@@ -196,7 +209,7 @@ there is no surprise to guard against.
 Pin the opening or closing frame, or supply style references:
 
 ```
-./mill run submit -m google/veo-3.1 -p prompt.txt \
+./mill run submit -m google/veo-3.1 -f prompt.txt \
   --first-frame https://example.com/open.png \
   --last-frame  https://example.com/close.png \
   --reference   https://example.com/style.png
@@ -221,7 +234,7 @@ Model-specific options go through `--param key=value` (`-P`), repeatable. The
 `passthrough` row of `list-models` shows what a model accepts:
 
 ```
-./mill run submit -m bytedance/seedance-2.0-mini -p prompt.txt \
+./mill run submit -m bytedance/seedance-2.0-mini -f prompt.txt \
   -P return_last_frame=true --await --json
 ```
 
@@ -262,7 +275,7 @@ completed has a URL to fetch right now. On both, `--force` requires
 media type the server declares:
 
 ```
-./mill run submit -m google/veo-3.1 -p prompt.txt --await --download
+./mill run submit -m google/veo-3.1 -f prompt.txt --await --download
 ```
 
 ```
@@ -333,7 +346,7 @@ How a video was made is easy to lose once the shell scrollback is gone.
 `--receipt` writes it down:
 
 ```
-./mill run submit -m google/veo-3.1 -p prompt.txt \
+./mill run submit -m google/veo-3.1 -f prompt.txt \
   --await --download-as out/clip.mp4 --receipt
 ```
 

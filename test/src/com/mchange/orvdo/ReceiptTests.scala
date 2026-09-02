@@ -79,6 +79,33 @@ object ReceiptTests extends TestSuite:
         assert(text.contains("SHA-256") && text.contains(run(Main.sha256(video))))
         assert(text.endsWith("Prompt:\na duck\n"))
 
+    test("a file-only prompt is its trimmed contents"):
+      withTemp: dir =>
+        os.write(dir / "p.txt", "  a duck in a hat\n\n")
+        assert(run(Main.readPrompt(Some(dir / "p.txt"), None)) == "a duck in a hat")
+
+    test("an argument-only prompt is itself"):
+      assert(run(Main.readPrompt(None, Some("a duck in a hat"))) == "a duck in a hat")
+
+    test("both: the file leads, a blank line, then the argument"):
+      withTemp: dir =>
+        os.write(dir / "p.txt", "a duck in a hat\n")
+        assert(run(Main.readPrompt(Some(dir / "p.txt"), Some("at dusk"))) ==
+          "a duck in a hat\n\nat dusk")
+
+    test("a missing prompt file is named, not merely absent"):
+      withTemp: dir =>
+        val e = runEither(Main.readPrompt(Some(dir / "nope.txt"), Some("x"))).left.toOption.get
+        assert(e.getMessage.contains("no such prompt file"))
+
+    test("an empty prompt file is still an error, even alongside an argument"):
+      withTemp: dir =>
+        os.write(dir / "empty.txt", "   \n")
+        assert(runEither(Main.readPrompt(Some(dir / "empty.txt"), Some("x"))).isLeft)
+
+    test("an empty argument with no file is an empty prompt"):
+      assert(runEither(Main.readPrompt(None, Some("   "))).isLeft)
+
     test("an auto name is derived from the job and the media type"):
       assert(Main.autoName(job, 0, 1, "mp4") == "video_JOB123.mp4")
 
