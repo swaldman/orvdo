@@ -133,8 +133,7 @@ Receipt     /Users/swaldman/tmp/video_20260902T170327Z_i3cl3HBsrhssEAMtNUks.mp4.
 
 Check out your new mp4 file, `video_20260902T170327Z_i3cl3HBsrhssEAMtNUks.mp4`:
 
-
-
+https://github.com/user-attachments/assets/9da1b1fb-3f00-4834-9453-06ac73afc2ba
 
 ## Build
 
