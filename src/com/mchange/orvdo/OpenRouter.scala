@@ -28,8 +28,15 @@ object OpenRouter:
     def wrap[A](a : A, json : ujson.Value) : T[A]
     def value[A](ta : T[A]) : A
 
-  private def jsonHeaders(apiKey: String): Map[String, String] =
-    Map("Authorization" -> s"Bearer $apiKey", "Content-Type" -> "application/json")
+  private def jsonHeaders(apiKey: String): Map[String, String] = jsonHeaders(Some(apiKey))
+
+  /** The catalog is served to anyone, so its key is optional; every other
+    * operation requires one and passes `Some`. Sending the key when we have it
+    * even for the catalog, since a request that identifies itself is the better
+    * citizen where rate limits are concerned. */
+  private def jsonHeaders(apiKey: Option[String]): Map[String, String] =
+    Map("Content-Type" -> "application/json") ++
+      apiKey.map(k => "Authorization" -> s"Bearer $k")
 
   private def checked(r: requests.Response): requests.Response =
     if r.statusCode >= 400 then throw ApiError(r.statusCode, r.text()) else r
@@ -73,7 +80,7 @@ object OpenRouter:
 
   private def readJob(r: requests.Response) : VideoJob = _readJob[Id](r)
 
-  private def _listModels[T[_] : JsonWrapper](apiKey: String): Task[T[VideoModels]] =
+  private def _listModels[T[_] : JsonWrapper](apiKey: Option[String]): Task[T[VideoModels]] =
     ZIO.attemptBlocking:
       val r = requests.get(
         s"$BaseUrl/videos/models",
@@ -115,7 +122,7 @@ object OpenRouter:
     *
     * Returns the envelope with the JSON it came from, so callers can report
     * catalog fields we do not model. Same reasoning as `readJob`. */
-  def rawListModels(apiKey: String): Task[Raw[VideoModels]] = _listModels[Raw](apiKey)
+  def rawListModels(apiKey: Option[String] = None): Task[Raw[VideoModels]] = _listModels[Raw](apiKey)
 
   /** POST /videos — returns immediately with a job id and polling URL.
     *
@@ -138,7 +145,12 @@ object OpenRouter:
   )(onPoll: VideoJob => UIO[Unit]): Task[Raw[VideoJob]] =
     _awaitCompletion[Raw](apiKey, job, every, timeout)(onPoll)
 
-  def listModels(apiKey: String): Task[VideoModels] = _listModels[Id](apiKey)
+  /** The video catalog, which OpenRouter serves without authentication.
+    *
+    * Verified: the endpoint answers 200 with no `Authorization` header at all,
+    * and returns byte-identical content to an authenticated request. The key is
+    * therefore optional here and required nowhere else in this object. */
+  def listModels(apiKey: Option[String] = None): Task[VideoModels] = _listModels[Id](apiKey)
 
   /** The provider slugs this model routes to, which is what
     * `provider.options` must be keyed by. Lives on the general models route,

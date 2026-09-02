@@ -63,7 +63,7 @@ final case class Provenance(
 )
 
 enum Cmd:
-  case ListModels(apiKey: String, filter: Option[String])
+  case ListModels(apiKey: Option[String], filter: Option[String])
   case Check(
       apiKey: String,
       jobId: String,
@@ -123,6 +123,17 @@ object Cli:
       "OPENROUTER_API_KEY",
       help = "Your OpenRouter API key. Create one at https://openrouter.ai/keys."
     )
+
+  /** `list-models` reads a public endpoint, so it does not insist on a key —
+    * browsing the catalog should not require signing up. The key is still sent
+    * when the variable happens to be set. */
+  private val optionalApiKey: Opts[Option[String]] =
+    Opts
+      .env[String](
+        "OPENROUTER_API_KEY",
+        help = "Your OpenRouter API key. Optional here: the model catalog is public."
+      )
+      .orNone
 
   /** `Option[Boolean]`, not `orFalse`: the difference between "the user asked
     * for silence" and "the user said nothing" is exactly what decides whether
@@ -266,7 +277,7 @@ object Cli:
       "List the available video generation models with their supported parameters and pricing."
     )(
       (
-        apiKey,
+        optionalApiKey,
         Opts
           .option[String](
             "filter",
@@ -524,7 +535,7 @@ object Main extends ZIOAppDefault:
     * levels: the envelope and each entry. Every path that reads the catalog
     * goes through here, so the warning cannot depend on which subcommand
     * happened to fetch it. */
-  private def loadCatalog(apiKey: String): Task[List[VideoModel]] =
+  private def loadCatalog(apiKey: Option[String]): Task[List[VideoModel]] =
     for
       raw <- OpenRouter.rawListModels(apiKey)
       _ <- warnUnmodeled("VideoModels", Wire.unmodeled(raw.json, VideoModels.knownKeys))
@@ -551,7 +562,7 @@ object Main extends ZIOAppDefault:
     * honour the cost-safety promise, and an unknown slug is far more often a
     * typo than a model OpenRouter serves but does not list. */
   private def findModel(apiKey: String, slug: String): Task[VideoModel] =
-    loadCatalog(apiKey)
+    loadCatalog(Some(apiKey))
       .flatMap { ms =>
         ZIO
           .fromOption(ms.find(_.id == slug))

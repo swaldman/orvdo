@@ -75,9 +75,13 @@ else's machine, or add a `//> using repository` line to
 export OPENROUTER_API_KEY=sk-or-...
 ```
 
-Every subcommand declares this as a required environment variable, so it shows
-up in `--help` and a missing key produces a proper usage error rather than a
-stack trace.
+Every subcommand that talks to your account declares this as a required
+environment variable, so it shows up in `--help` and a missing key produces a
+proper usage error rather than a stack trace.
+
+`list-models` is the exception: the model catalog is public, so browsing it
+needs no key and no account. The key is still sent if the variable happens to
+be set.
 
 ## Usage
 

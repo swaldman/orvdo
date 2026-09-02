@@ -30,8 +30,29 @@ object CliTests extends TestSuite:
       assert(s.promptFile.isDefined && s.prompt == Some("at dusk"))
 
     test("a missing key is a usage error, not a stack trace"):
-      val errs = Cli.command.parse(Seq("list-models"), Map.empty).left.toOption.get.errors
+      val errs = Cli.command.parse(Seq("check", "--job-id", "x"), Map.empty).left.toOption.get.errors
       assert(errs.exists(_.contains(Key)))
+
+    test("list-models needs no key: the catalog is public"):
+      // Verified against the API: 200 with no Authorization header at all, and
+      // byte-identical content to an authenticated request.
+      Cli.command.parse(Seq("list-models"), Map.empty) match
+        case Right(Cmd.ListModels(key, _)) => assert(key.isEmpty)
+        case other                         => assert(false)
+
+    test("but list-models still sends a key when one is set"):
+      Cli.command.parse(Seq("list-models"), Env) match
+        case Right(Cmd.ListModels(key, _)) => assert(key.contains("sk-or-test"))
+        case other                         => assert(false)
+
+    test("every other subcommand still requires a key"):
+      for args <- Seq(
+            Seq("check", "--job-id", "x"),
+            Seq("submit", "-m", "m/x", "-p", "a duck"),
+            Seq("run", "-m", "m/x", "-p", "a duck"),
+            Seq("download", "-u", "https://openrouter.ai/x", "--as", "o.mp4")
+          )
+      do assert(Cli.command.parse(args, Map.empty).isLeft)
 
     test("force-requires-a-download, on submit"):
       assert(errorOf(submitArgs("--force")*).contains("--force only means something alongside"))
