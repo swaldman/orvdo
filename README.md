@@ -298,7 +298,7 @@ media type the server declares:
 ```
 
 ```
-video_B7pFInVvvptLkVDxixee.mp4
+video_20260902T150233Z_B7pFInVvvptLkVDxixee.mp4
 ```
 
 That is usually what you want. `--download-as` aims at a fixed name, so
@@ -307,9 +307,24 @@ run left there — and the no-clobber machinery below, which is meant as a safet
 net, fires as routine. A name carrying the job id cannot collide with a
 different job.
 
+The timestamp leads because job ids carry no order of their own, and clips are
+often generated to be joined in sequence — pulling the last frame of one to open
+the next. A UTC timestamp in this format sorts lexicographically into
+chronological order, so plain `ls` reconstructs the sequence:
+
+```
+video_20260902T140312Z_zQ7bK2mXpL.mp4
+video_20260902T141847Z_aB3nR9tYuI.mp4
+video_20260902T143001Z_M5wE1cVdOs.mp4
+```
+
+It is UTC rather than local time precisely so the ordering survives time zones
+and daylight saving; the date in a filename may not be your date.
+
 `--download` also saves *every* output a job produced, numbering them
-`video_<jobId>_0.mp4`, `video_<jobId>_1.mp4` and so on, where `--download-as`
-can only name one and takes the first. Files land in the working directory.
+`video_<timestamp>_<jobId>_0.mp4`, `_1.mp4` and so on, where `--download-as`
+can only name one and takes the first. Every output of a job shares one
+timestamp, so they group. Files land in the working directory.
 
 The extension comes from the response's `Content-Type`, since the content
 endpoint sends no `Content-Disposition` and there is nothing else to go on. An

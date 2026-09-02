@@ -835,6 +835,23 @@ object Main extends ZIOAppDefault:
     val suffix = if path.ext.isEmpty then "" else "." + path.ext
     path / os.up / s"${path.baseName}_$safe$suffix"
 
+  /** A free path in a numbered series: `x.mp4`, then `x-2.mp4`, `x-3.mp4`.
+    *
+    * For auto-named files, where annotating would only repeat what the name
+    * already says: it carries a timestamp *and* a job id, so a collision means
+    * the same job saved twice inside the same second. A counter is what is left
+    * that distinguishes them, and it sorts adjacent to the original, which
+    * matters — the timestamp is there so `ls` reconstructs a sequence, and a
+    * disambiguator that scattered the file elsewhere would defeat it. */
+  private[orvdo] def freeSequential(desired: os.Path, force: Boolean, limit: Int = 99): Target =
+    if force || !os.exists(desired) then Target.Requested(desired)
+    else
+      val suffix = if desired.ext.isEmpty then "" else "." + desired.ext
+      def candidate(n: Int) = desired / os.up / s"${desired.baseName}-$n$suffix"
+      Iterator.range(2, limit + 1).map(candidate).find(p => !os.exists(p)) match
+        case Some(free) => Target.Diverted(free, desired)
+        case None       => Target.Blocked(desired, candidate(limit))
+
   /** Decide where a save can land. `--force` means the caller has already
     * accepted the loss, so no diversion is attempted. */
   private[orvdo] def freeTarget(desired: os.Path, jobId: String, force: Boolean): Target =
@@ -889,18 +906,34 @@ object Main extends ZIOAppDefault:
     * Returns the path written and, when it is not the path asked for, the one
     * that was. The caller reports that as a failure — the bytes are safe, but
     * the command did not do what it was told. */
-  /** The name `--download` gives a video: `video_<jobId>.<ext>`, or
-    * `video_<jobId>_<n>.<ext>` when the job produced several.
+  /** The name `--download` gives a video: `video_<timestamp>_<jobId>.<ext>`, or
+    * `video_<timestamp>_<jobId>_<n>.<ext>` when the job produced several.
     *
-    * The extension comes from the media type the server declared, which is the
-    * only source available — the content endpoint sends no
-    * `Content-Disposition`. The job id makes the name unique per render, which
-    * is the whole point: re-running a command out of shell history aims at a
-    * name that belongs to *this* job, not the last one. */
-  private[orvdo] def autoName(job: VideoJob, index: Int, of: Int, extension: String): String =
+    * The job id makes the name unique per render, which is the point: rerunning
+    * a command out of shell history aims at a name belonging to *this* job, not
+    * the last one. The timestamp leads because job ids are unordered, and clips
+    * are often generated to be joined in sequence — pulling the last frame of
+    * one to open the next. A UTC timestamp in this format sorts
+    * lexicographically into chronological order, so plain `ls` reconstructs the
+    * sequence. UTC rather than local time precisely so that ordering survives
+    * time zones and daylight saving.
+    *
+    * Every output of one job shares a single timestamp; it is taken once per
+    * download, not once per file, or a multi-output job could straddle a second
+    * boundary and scatter.
+    *
+    * The extension comes from the media type the server declared, the content
+    * endpoint sending no `Content-Disposition`. */
+  private[orvdo] def autoName(
+      job: VideoJob,
+      stamp: String,
+      index: Int,
+      of: Int,
+      extension: String
+  ): String =
     val safe = job.id.map(c => if c.isLetterOrDigit || "-_.".contains(c) then c else '-')
     val ordinal = if of > 1 then s"_$index" else ""
-    s"video_$safe$ordinal.$extension"
+    s"video_${stamp}_$safe$ordinal.$extension"
 
   /** Save what the job produced.
     *
@@ -943,17 +976,22 @@ object Main extends ZIOAppDefault:
         val urls = job.contentUrls
         if urls.isEmpty then noContent
         else
-          // Fetched before named, because the name depends on the media type.
-          ZIO.foreach(urls.zipWithIndex) { (url, i) =>
-            for
-              fetched <- OpenRouter.fetch(apiKey, url)
-              desired = os.pwd / autoName(job, i, urls.size, fetched.extension)
-              path <- freeTarget(desired, timestamp(), force) match
-                case Target.Requested(p)   => writeBytes(p, fetched.bytes).as(p -> None)
-                case Target.Diverted(p, r) => writeBytes(p, fetched.bytes).as(p -> Some(r))
-                case Target.Blocked(r, f)  => ZIO.fail(NotSaved("the video", r, f, Some(url)))
-            yield path
-          }
+          for
+            // Once for the whole download, so every output of a job carries the
+            // same timestamp and they sort together.
+            stamp <- ZIO.succeed(timestamp())
+            // Fetched before named, because the name depends on the media type.
+            paths <- ZIO.foreach(urls.zipWithIndex) { (url, i) =>
+              for
+                fetched <- OpenRouter.fetch(apiKey, url)
+                desired = os.pwd / autoName(job, stamp, i, urls.size, fetched.extension)
+                path <- freeSequential(desired, force) match
+                  case Target.Requested(p)   => writeBytes(p, fetched.bytes).as(p -> None)
+                  case Target.Diverted(p, r) => writeBytes(p, fetched.bytes).as(p -> Some(r))
+                  case Target.Blocked(r, f)  => ZIO.fail(NotSaved("the video", r, f, Some(url)))
+              yield path
+            }
+          yield paths
 
   private def writeBytes(path: os.Path, bytes: Array[Byte]): Task[Unit] =
     ZIO.attemptBlocking {
@@ -987,9 +1025,9 @@ object Main extends ZIOAppDefault:
 
       case n: NotSaved =>
         List(
-          s"error: ${n.requested}",
-          s"       and ${n.fallback}",
-          s"       both exist, so ${n.what} was not written."
+          s"error: ${n.requested} is taken,",
+          s"       and so is ${n.fallback},",
+          s"       so ${n.what} was not written."
         ) ++ n.url.fold(Nil)(u =>
           List(
             "       The content is still on OpenRouter, and is not lost. Fetch it with:",

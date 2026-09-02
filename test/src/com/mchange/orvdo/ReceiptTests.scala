@@ -106,16 +106,30 @@ object ReceiptTests extends TestSuite:
     test("an empty argument with no file is an empty prompt"):
       assert(runEither(Main.readPrompt(None, Some("   "))).isLeft)
 
-    test("an auto name is derived from the job and the media type"):
-      assert(Main.autoName(job, 0, 1, "mp4") == "video_JOB123.mp4")
+    val stamp = "20260902T131415Z"
+
+    test("an auto name is timestamp, then job, then media type"):
+      assert(Main.autoName(job, stamp, 0, 1, "mp4") == "video_20260902T131415Z_JOB123.mp4")
 
     test("and is numbered only when there is more than one output"):
-      assert(Main.autoName(job, 0, 3, "mp4") == "video_JOB123_0.mp4")
-      assert(Main.autoName(job, 2, 3, "mp4") == "video_JOB123_2.mp4")
+      assert(Main.autoName(job, stamp, 0, 3, "mp4") == "video_20260902T131415Z_JOB123_0.mp4")
+      assert(Main.autoName(job, stamp, 2, 3, "mp4") == "video_20260902T131415Z_JOB123_2.mp4")
 
     test("an auto name sanitises the job id like any other"):
       val odd = upickle.default.read[VideoJob]("""{"id":"a/b c","status":"completed"}""")
-      assert(Main.autoName(odd, 0, 1, "mp4") == "video_a-b-c.mp4")
+      assert(Main.autoName(odd, stamp, 0, 1, "mp4") == "video_20260902T131415Z_a-b-c.mp4")
+
+    test("names sort into the order the clips were made"):
+      // The point of leading with the timestamp: clips are often generated to
+      // be joined in sequence, and job ids carry no order at all.
+      val early = Main.autoName(job, "20260902T090000Z", 0, 1, "mp4")
+      val later = Main.autoName(job, "20260902T131415Z", 0, 1, "mp4")
+      val newYear = Main.autoName(job, "20270101T000000Z", 0, 1, "mp4")
+      assert(List(newYear, later, early).sorted == List(early, later, newYear))
+
+    test("and a job's several outputs stay together and in order"):
+      val names = (0 until 3).map(i => Main.autoName(job, stamp, i, 3, "mp4"))
+      assert(names.sorted == names)
 
     test("the extension comes from the declared media type"):
       def ext(ct: Option[String]) = Fetched(Array.emptyByteArray, ct).extension
@@ -137,6 +151,36 @@ object ReceiptTests extends TestSuite:
     test("a job id is sanitised before it becomes a filename"):
       // Job ids are opaque; a separator in one must not become a directory.
       assert(Main.annotated(os.Path("/a/clip.mp4"), "a/b c").last == "clip_a-b-c.mp4")
+
+    test("a numbered fallback is used when an auto name is taken"):
+      withTemp: dir =>
+        os.write(dir / "video_TS_JOB.mp4", "occupied")
+        assert(Main.freeSequential(dir / "video_TS_JOB.mp4", false) ==
+          Target.Diverted(dir / "video_TS_JOB-2.mp4", dir / "video_TS_JOB.mp4"))
+
+    test("and it counts past whatever is already there"):
+      withTemp: dir =>
+        for n <- Seq("video_TS_JOB.mp4", "video_TS_JOB-2.mp4", "video_TS_JOB-3.mp4") do
+          os.write(dir / n, "occupied")
+        assert(Main.freeSequential(dir / "video_TS_JOB.mp4", false) ==
+          Target.Diverted(dir / "video_TS_JOB-4.mp4", dir / "video_TS_JOB.mp4"))
+
+    test("a numbered fallback stays adjacent in sort order"):
+      // A disambiguator that scattered the file would defeat the timestamp.
+      val names = List("video_TS_JOB.mp4", "video_TS_JOB-2.mp4", "video_TS_OTHER.mp4").sorted
+      assert(names.indexOf("video_TS_JOB-2.mp4") - names.indexOf("video_TS_JOB.mp4") == -1)
+
+    test("freeSequential gives up rather than counting forever"):
+      withTemp: dir =>
+        os.write(dir / "x.mp4", "occupied")
+        for n <- 2 to 4 do os.write(dir / s"x-$n.mp4", "occupied")
+        assert(Main.freeSequential(dir / "x.mp4", false, limit = 4) ==
+          Target.Blocked(dir / "x.mp4", dir / "x-4.mp4"))
+
+    test("--force skips the search entirely"):
+      withTemp: dir =>
+        os.write(dir / "x.mp4", "occupied")
+        assert(Main.freeSequential(dir / "x.mp4", true) == Target.Requested(dir / "x.mp4"))
 
     test("freeTarget takes the requested path when it is free"):
       withTemp: dir =>

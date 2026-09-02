@@ -19,8 +19,10 @@ final case class ApiError(status: Int, body: String) extends OrvdoException(s"Op
 final case class SavedElsewhere(what: String, requested: os.Path, actual: os.Path)
     extends OrvdoException(s"$requested already exists, so $what was saved as $actual instead")
 
-/** Both the requested path and its annotated fallback were occupied, so
-  * nothing was written at all. `url`, when present, is what will fetch the
+/** Both the requested path and every fallback tried were occupied, so nothing
+  * was written at all. `fallback` is the last name attempted — for an
+  * auto-named file that is the end of a numbered series, not a single
+  * alternative, hence the wording. `url`, when present, is what will fetch the
   * content that never landed. */
 final case class NotSaved(what: String, requested: os.Path, fallback: os.Path, url: Option[String])
-    extends OrvdoException(s"$requested and $fallback both exist, so $what was not written")
+    extends OrvdoException(s"$requested is taken, and so is $fallback, so $what was not written")
