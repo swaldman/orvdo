@@ -258,6 +258,31 @@ no video until the job finishes. On `check` it does not: a job that has already
 completed has a URL to fetch right now. On both, `--force` requires
 `--download-as`. All enforced at parse time.
 
+`--download` takes no argument and names the files itself, from the job and the
+media type the server declares:
+
+```
+./mill run submit -m google/veo-3.1 -p prompt.txt --await --download
+```
+
+```
+video_B7pFInVvvptLkVDxixee.mp4
+```
+
+That is usually what you want. `--download-as` aims at a fixed name, so
+re-running a command out of shell history collides with the file the *previous*
+run left there — and the no-clobber machinery below, which is meant as a safety
+net, fires as routine. A name carrying the job id cannot collide with a
+different job.
+
+`--download` also saves *every* output a job produced, numbering them
+`video_<jobId>_0.mp4`, `video_<jobId>_1.mp4` and so on, where `--download-as`
+can only name one and takes the first. Files land in the working directory.
+
+The extension comes from the response's `Content-Type`, since the content
+endpoint sends no `Content-Disposition` and there is nothing else to go on. An
+unrecognised type gets `.bin` rather than a guess.
+
 Nothing is ever overwritten without `--force`. If the target name is taken, the
 file is saved beside it under a job-annotated name instead, loudly:
 

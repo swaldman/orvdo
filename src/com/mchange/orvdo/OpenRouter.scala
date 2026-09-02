@@ -175,15 +175,31 @@ object OpenRouter:
 
   /** Content URLs are unsigned, so the download carries the bearer token too. */
   def download(apiKey: String, contentUrl: String, target: os.Path, force: Boolean): Task[os.Path] =
+    for
+      _ <- ZIO.attemptBlocking(if os.exists(target) && !force then throw TargetExists(target))
+      fetched <- fetch(apiKey, contentUrl)
+      _ <- ZIO.attemptBlocking {
+        os.makeDir.all(target / os.up)
+        os.write.over(target, fetched.bytes)
+      }
+    yield target
+
+  /** The bytes, and the media type the server declared for them.
+    *
+    * The type matters because a caller that did not name the file has nothing
+    * else to go on: the content endpoint sends no `Content-Disposition`, so
+    * there is no suggested filename to take. Splitting this out of `download`
+    * costs nothing — the bytes were already read whole — and means the name
+    * can be chosen after the type is known rather than guessed before. */
+  def fetch(apiKey: String, contentUrl: String): Task[Fetched] =
     ZIO.attemptBlocking {
-      if os.exists(target) && !force then throw TargetExists(target)
-      os.makeDir.all(target / os.up)
-      val r = requests.get(
-        contentUrl,
-        headers = Map("Authorization" -> s"Bearer $apiKey"),
-        check = false,
-        readTimeout = 600_000
+      val r = checked(
+        requests.get(
+          contentUrl,
+          headers = Map("Authorization" -> s"Bearer $apiKey"),
+          check = false,
+          readTimeout = 600_000
+        )
       )
-      os.write.over(target, checked(r).bytes)
-      target
+      Fetched(r.bytes, r.headers.get("content-type").flatMap(_.headOption))
     }

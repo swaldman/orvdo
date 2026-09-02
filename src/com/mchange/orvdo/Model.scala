@@ -14,6 +14,28 @@ import upickle.default.ReadWriter
   *     without breaking us.
   */
 
+/** Content bytes with the media type the server declared for them. */
+final case class Fetched(bytes: Array[Byte], contentType: Option[String]):
+  /** An extension for the declared type.
+    *
+    * Only the types OpenRouter is known to serve, plus a fallback. Guessing at
+    * an unrecognised type would invent an extension; `bin` is unhelpful but it
+    * does not lie, and the media type is reported alongside so the user can
+    * rename with better information than we had. */
+  def extension: String =
+    contentType.map(_.takeWhile(_ != ';').trim.toLowerCase) match
+      case Some("video/mp4")        => "mp4"
+      case Some("video/quicktime")  => "mov"
+      case Some("video/webm")       => "webm"
+      case Some("video/x-matroska") => "mkv"
+      case Some("image/png")        => "png"
+      case Some("image/jpeg")       => "jpg"
+      case Some("image/webp")       => "webp"
+      case Some("image/gif")        => "gif"
+      case Some("audio/mpeg")       => "mp3"
+      case Some("application/json") => "json"
+      case _                        => "bin"
+
 final case class ImageUrl(url: String) derives ReadWriter
 
 /** One OpenAI-style content part, serving both `frame_images` (where

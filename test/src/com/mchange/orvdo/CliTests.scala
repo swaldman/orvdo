@@ -18,23 +18,40 @@ object CliTests extends TestSuite:
       val errs = Cli.command.parse(Seq("list-models"), Map.empty).left.toOption.get.errors
       assert(errs.exists(_.contains(Key)))
 
-    test("force-requires-download-as, on submit"):
+    test("force-requires-a-download, on submit"):
       assert(errorOf(submitArgs("--force")*).contains("--force only means something alongside"))
 
     test("force-requires-download-as, on check too"):
       assert(errorOf("check", "--job-id", "x", "--force").contains("--force only means something"))
 
     test("download-as-requires-await, on submit"):
-      assert(errorOf(submitArgs("--download-as", "out.mp4")*).contains("--download-as requires --await"))
+      assert(errorOf(submitArgs("--download-as", "out.mp4")*).contains("require --await"))
 
     test("but not on check, where a finished job already has a URL"):
       // The case `check --download-as` exists for: fetching after the fact.
       val c = checkOf("check", "--job-id", "x", "--download-as", "out.mp4")
-      assert(c.downloadAs.isDefined && !c.await)
+      assert(c.download != DownloadTo.No && !c.await)
 
     test("await plus download-as is accepted on submit"):
       val s = submitOf(submitArgs("--await", "--download-as", "out.mp4")*)
-      assert(s.await && s.downloadAs.isDefined)
+      assert(s.await && s.download.isInstanceOf[DownloadTo.At])
+
+    test("--download needs no argument, and is distinct from not asking"):
+      assert(submitOf(submitArgs()*).download == DownloadTo.No)
+      assert(submitOf(submitArgs("--await", "--download")*).download == DownloadTo.Auto)
+
+    test("--download also requires --await on submit"):
+      assert(errorOf(submitArgs("--download")*).contains("require --await"))
+
+    test("--download alone is enough for --force"):
+      assert(parse(submitArgs("--await", "--download", "--force")*).isRight)
+
+    test("--download works on check, with no --await needed"):
+      assert(checkOf("check", "--job-id", "x", "--download").download == DownloadTo.Auto)
+
+    test("--download-as wins if both are given"):
+      assert(submitOf(submitArgs("--await", "--download", "--download-as", "o.mp4")*)
+        .download == DownloadTo.At(os.Path("o.mp4", os.pwd)))
 
     test("audio unset is distinct from audio off"):
       assert(submitOf(submitArgs()*).generateAudio.isEmpty)

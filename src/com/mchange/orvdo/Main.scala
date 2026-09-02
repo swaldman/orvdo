@@ -20,11 +20,24 @@ enum ReceiptTo:
 /** The output-side options, which `submit` and `check` share entirely. Bundled
   * so the function that acts on them takes four arguments rather than eight. */
 final case class Output(
-    downloadAs: Option[os.Path],
+    download: DownloadTo,
     force: Boolean,
     json: Boolean,
     receipt: ReceiptTo
 )
+
+/** Whether to save the video, and under whose choice of name.
+  *
+  * `Auto` exists because `--download-as` is the wrong default for repeated
+  * use: re-running a command out of shell history aims at a name that is now
+  * occupied, and the no-clobber diversion — a safety net — fires as a matter of
+  * routine. A name derived from the job cannot collide with the previous run of
+  * a *different* job, which is the common case.
+  */
+enum DownloadTo:
+  case No
+  case Auto
+  case At(path: os.Path)
 
 /** Where a save may go without destroying anything.
   *
@@ -55,7 +68,7 @@ enum Cmd:
       apiKey: String,
       jobId: String,
       await: Boolean,
-      downloadAs: Option[os.Path],
+      download: DownloadTo,
       force: Boolean,
       json: Boolean,
       receipt: ReceiptTo
@@ -73,7 +86,7 @@ enum Cmd:
       lastFrame: Option[ImageUrl],
       references: List[ImageUrl],
       await: Boolean,
-      downloadAs: Option[os.Path],
+      download: DownloadTo,
       force: Boolean,
       json: Boolean,
       receipt: ReceiptTo,
@@ -143,8 +156,18 @@ object Cli:
 
   /** Shared by `submit` and `check`; the help differs because only `submit` has
     * an `--await` to depend on. */
-  private def downloadAs(help: String): Opts[Option[os.Path]] =
-    Opts.option[os.Path]("download-as", help, metavar = "path").orNone
+  /** `--download` names the file for you; `--download-as` lets you name it.
+    * Three states rather than a flag plus an option, so "not asked for" stays
+    * distinguishable from "asked for, at a name of your choosing". */
+  private def downloadTo(flagHelp: String, pathHelp: String): Opts[DownloadTo] =
+    (
+      Opts.flag("download", flagHelp).orFalse,
+      Opts.option[os.Path]("download-as", pathHelp, metavar = "path").orNone
+    ).mapN {
+      case (_, Some(path)) => DownloadTo.At(path)
+      case (true, None)    => DownloadTo.Auto
+      case (false, None)   => DownloadTo.No
+    }
 
   private val await: Opts[Boolean] =
     Opts
@@ -152,7 +175,7 @@ object Cli:
       .orFalse
 
   private val force: Opts[Boolean] =
-    Opts.flag("force", "Overwrite the --download-as target if it already exists.").orFalse
+    Opts.flag("force", "Overwrite an existing target instead of saving beside it.").orFalse
 
   /** `--receipt` alone derives a path; `--receipt-as` names one and implies the
     * former, so there is no way to ask for a receipt location without a
@@ -261,7 +284,10 @@ object Cli:
       apiKey,
       Opts.option[String]("job-id", "The job id returned by `submit`.", metavar = "id"),
       await,
-      downloadAs("Write this job's video to this path."),
+      downloadTo(
+        "Save this job's videos, naming them for the job.",
+        "Write this job's video to this path."
+      ),
       force,
       json,
       receipt
@@ -270,8 +296,8 @@ object Cli:
   private val check: Opts[Cmd] =
     Opts.subcommand("check", "Fetch the latest state of a previously submitted job.")(
       checkOpts.mapValidated { c =>
-        if c.force && c.downloadAs.isEmpty then
-          Validated.invalidNel("--force only means something alongside --download-as.")
+        if c.force && c.download == DownloadTo.No then
+          Validated.invalidNel("--force only means something alongside --download or --download-as.")
         else Validated.valid(c)
       }
     )
@@ -337,7 +363,10 @@ object Cli:
         )
         .orEmpty,
       await,
-      downloadAs("Write the finished video to this path. Requires --await."),
+      downloadTo(
+        "Save the finished videos, naming them for the job. Requires --await.",
+        "Write the finished video to this path. Requires --await."
+      ),
       force,
       json,
       receipt,
@@ -347,10 +376,12 @@ object Cli:
   private val submit: Opts[Cmd] =
     Opts.subcommand("submit", "Submit a text-to-video generation job.")(
       submitOpts.mapValidated { s =>
-        if s.downloadAs.isDefined && !s.await then
-          Validated.invalidNel("--download-as requires --await; there is no video to save until the job finishes.")
-        else if s.force && s.downloadAs.isEmpty then
-          Validated.invalidNel("--force only means something alongside --download-as.")
+        if s.download != DownloadTo.No && !s.await then
+          Validated.invalidNel(
+            "--download and --download-as require --await; there is no video to save until the job finishes."
+          )
+        else if s.force && s.download == DownloadTo.No then
+          Validated.invalidNel("--force only means something alongside --download or --download-as.")
         else Validated.valid(s)
       }
     )
@@ -400,7 +431,7 @@ object Main extends ZIOAppDefault:
         // receipt written here has no model block and no prompt.
         _ <- reportAndDownload(
           c.apiKey,
-          Output(c.downloadAs, c.force, c.json, c.receipt),
+          Output(c.download, c.force, c.json, c.receipt),
           finished,
           Provenance()
         )
@@ -418,7 +449,7 @@ object Main extends ZIOAppDefault:
         provider <- passthroughFor(s, model)
         job <- OpenRouter.rawSubmit(s.apiKey, request, provider)
         provenance = Provenance(Some(model), Some(prompt), Some(VideoRequest.body(request, provider)))
-        out = Output(s.downloadAs, s.force, s.json, s.receipt)
+        out = Output(s.download, s.force, s.json, s.receipt)
         _ <-
           // Without --await there is nothing to download, so this reduces to
           // printing the record and writing the receipt. Worth doing anyway:
@@ -641,24 +672,22 @@ object Main extends ZIOAppDefault:
       provenance: Provenance
   ): Task[Unit] =
     for
-      attempted <- downloadFor(apiKey, out.downloadAs, out.force, job.value).either
-      saved = attempted.toOption.flatten
+      attempted <- downloadFor(apiKey, out.download, out.force, job.value).either
+      saved = attempted.toOption.getOrElse(Nil)
       _ <- printJob(job, out.json)
-      _ <- saved match
-        case Some((path, _)) =>
-          // `downloadFor` takes `firstContentUrl`, so a job with several
-          // outputs loses all but index 0 unless we say so. Stderr, since the
-          // record on stdout already lists every URL.
-          Console.printLine(Render.saved(path)) *>
-            progress(Render.unsaved(job.value, path))
-              .when(job.value.contentUrls.sizeIs > 1)
-              .unit
-        case None => ZIO.unit
+      _ <- ZIO.foreachDiscard(saved)((path, _) => Console.printLine(Render.saved(path)))
+      // `--download-as` names one file and so takes only the first output;
+      // `--download` names them all and takes them all, so the warning would
+      // be false there. Stderr, since the record on stdout lists every URL.
+      _ <- progress(Render.unsaved(job.value, saved.head._1))
+        .when(out.download.isInstanceOf[DownloadTo.At] && saved.nonEmpty &&
+              job.value.contentUrls.sizeIs > 1)
+        .unit
       // A receipt is written whether or not the download worked, and records
       // the digest only when there is a file to digest. Its own failure is
       // captured for the same reason the download's is: the record has been
       // printed by now and must not be retracted.
-      wrote <- writeReceipt(out, job.value, saved.map(_._1), provenance).either
+      wrote <- writeReceipt(out, job.value, saved.headOption.map(_._1), provenance).either
       _ <- wrote match
         case Right(Some((path, _))) => Console.printLine(Render.receiptAt(path))
         case _                      => ZIO.unit
@@ -666,9 +695,11 @@ object Main extends ZIOAppDefault:
       _ <- ZIO.fromEither(wrote).unit
       // Everything landed, but possibly not where it was asked to. That is
       // still a failure, reported after the record so nothing is retracted.
-      _ <- saved match
-        case Some((path, Some(requested))) => ZIO.fail(SavedElsewhere("the video", requested, path))
-        case _                             => ZIO.unit
+      _ <- saved.collectFirst { case (path, Some(requested)) =>
+        SavedElsewhere("the video", requested, path)
+      } match
+        case Some(e) => ZIO.fail(e)
+        case None    => ZIO.unit
       _ <- wrote.toOption.flatten match
         case Some((path, Some(requested))) => ZIO.fail(SavedElsewhere("the receipt", requested, path))
         case _                             => ZIO.unit
@@ -684,7 +715,7 @@ object Main extends ZIOAppDefault:
     else
       for
         digest <- ZIO.foreach(downloaded)(p => sha256(p).map(p -> _))
-        desired = receiptPath(out, job, provenance.model.map(_.id).orElse(job.model))
+        desired = receiptPath(out, downloaded, job, provenance.model.map(_.id).orElse(job.model))
         // Receipts used to be written with `os.write.over`, on the reasoning
         // that a derived artefact may be regenerated. But a receipt records a
         // render that cost money and may name a file the new one does not, so
@@ -731,13 +762,18 @@ object Main extends ZIOAppDefault:
       if os.exists(fallback) then Target.Blocked(desired, fallback)
       else Target.Diverted(fallback, desired)
 
-  private[orvdo] def receiptPath(out: Output, job: VideoJob, modelId: Option[String]): os.Path =
+  private[orvdo] def receiptPath(
+      out: Output,
+      savedTo: Option[os.Path],
+      job: VideoJob,
+      modelId: Option[String]
+  ): os.Path =
     out.receipt match
       case ReceiptTo.At(path) => path
       case _ =>
-        // Follows the file that actually landed, so a diverted video takes its
-        // receipt with it: `clip_JOB.mp4` gets `clip_JOB.mp4.receipt`.
-        out.downloadAs match
+        // Follows the file that actually landed, so a diverted or auto-named
+        // video takes its receipt with it: `video_JOB.mp4.receipt`.
+        savedTo match
           case Some(video) => video / os.up / s"${video.last}.receipt"
           case None =>
             val slug = modelId.getOrElse("video").replace('/', '-')
@@ -771,31 +807,77 @@ object Main extends ZIOAppDefault:
     * Returns the path written and, when it is not the path asked for, the one
     * that was. The caller reports that as a failure — the bytes are safe, but
     * the command did not do what it was told. */
+  /** The name `--download` gives a video: `video_<jobId>.<ext>`, or
+    * `video_<jobId>_<n>.<ext>` when the job produced several.
+    *
+    * The extension comes from the media type the server declared, which is the
+    * only source available — the content endpoint sends no
+    * `Content-Disposition`. The job id makes the name unique per render, which
+    * is the whole point: re-running a command out of shell history aims at a
+    * name that belongs to *this* job, not the last one. */
+  private[orvdo] def autoName(job: VideoJob, index: Int, of: Int, extension: String): String =
+    val safe = job.id.map(c => if c.isLetterOrDigit || "-_.".contains(c) then c else '-')
+    val ordinal = if of > 1 then s"_$index" else ""
+    s"video_$safe$ordinal.$extension"
+
+  /** Save what the job produced.
+    *
+    * `--download-as` names one file and so takes only the first output, which
+    * is why the multi-video warning exists. `--download` names them all, so it
+    * takes them all — the gap that warning describes does not arise.
+    */
   private def downloadFor(
       apiKey: String,
-      target: Option[os.Path],
+      to: DownloadTo,
       force: Boolean,
       job: VideoJob
-  ): Task[Option[(os.Path, Option[os.Path])]] =
-    (target, job.firstContentUrl) match
-      case (None, _) => ZIO.none
-      case (Some(desired), Some(url)) =>
-        freeTarget(desired, job.id, force) match
-          case Target.Requested(path) =>
-            // force = true here even when the caller did not ask for it: we
-            // have just established the path is free, and `download`'s own
-            // guard would only re-check it.
-            OpenRouter.download(apiKey, url, path, force = true).map(p => Some(p -> None))
-          case Target.Diverted(path, requested) =>
-            OpenRouter.download(apiKey, url, path, force = true).map(p => Some(p -> Some(requested)))
-          case Target.Blocked(requested, fallback) =>
-            ZIO.fail(NotSaved("the video", requested, fallback, Some(url)))
-      case (Some(_), None) =>
-        ZIO.fail(
-          new RuntimeException(
-            s"nothing to download: job ${job.id} has status '${job.status}' and no content URL"
-          )
-        )
+  ): Task[List[(os.Path, Option[os.Path])]] =
+    def save(url: String, desired: os.Path, what: String): Task[(os.Path, Option[os.Path])] =
+      freeTarget(desired, job.id, force) match
+        // force = true below even when the caller did not ask: the path has
+        // just been established free, and `download`'s guard would re-check it.
+        case Target.Requested(path) =>
+          OpenRouter.download(apiKey, url, path, force = true).map(_ -> None)
+        case Target.Diverted(path, requested) =>
+          OpenRouter.download(apiKey, url, path, force = true).map(_ -> Some(requested))
+        case Target.Blocked(requested, fallback) =>
+          ZIO.fail(NotSaved(what, requested, fallback, Some(url)))
+
+    def noContent = ZIO.fail(
+      new RuntimeException(
+        s"nothing to download: job ${job.id} has status '${job.status}' and no content URL"
+      )
+    )
+
+    to match
+      case DownloadTo.No => ZIO.succeed(Nil)
+
+      case DownloadTo.At(desired) =>
+        job.firstContentUrl match
+          case Some(url) => save(url, desired, "the video").map(List(_))
+          case None      => noContent
+
+      case DownloadTo.Auto =>
+        val urls = job.contentUrls
+        if urls.isEmpty then noContent
+        else
+          // Fetched before named, because the name depends on the media type.
+          ZIO.foreach(urls.zipWithIndex) { (url, i) =>
+            for
+              fetched <- OpenRouter.fetch(apiKey, url)
+              desired = os.pwd / autoName(job, i, urls.size, fetched.extension)
+              path <- freeTarget(desired, timestamp(), force) match
+                case Target.Requested(p)   => writeBytes(p, fetched.bytes).as(p -> None)
+                case Target.Diverted(p, r) => writeBytes(p, fetched.bytes).as(p -> Some(r))
+                case Target.Blocked(r, f)  => ZIO.fail(NotSaved("the video", r, f, Some(url)))
+            yield path
+          }
+
+  private def writeBytes(path: os.Path, bytes: Array[Byte]): Task[Unit] =
+    ZIO.attemptBlocking {
+      os.makeDir.all(path / os.up)
+      os.write.over(path, bytes)
+    }
 
   /** A timeout is the most recoverable failure this tool produces: the job is
     * almost certainly still rendering, OpenRouter still has it, and the id is

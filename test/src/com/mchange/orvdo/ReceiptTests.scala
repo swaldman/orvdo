@@ -41,27 +41,27 @@ object ReceiptTests extends TestSuite:
         assert(d.length == 64 && d.forall(c => "0123456789abcdef".contains(c)))
 
     test("receiptPath: an explicit path wins"):
-      val out = Output(None, false, false, ReceiptTo.At(os.Path("/tmp/mine.txt")))
-      assert(Main.receiptPath(out, job, Some("google/veo-3.1")) == os.Path("/tmp/mine.txt"))
+      val out = Output(DownloadTo.No, false, false, ReceiptTo.At(os.Path("/tmp/mine.txt")))
+      assert(Main.receiptPath(out, None, job, Some("google/veo-3.1")) == os.Path("/tmp/mine.txt"))
 
     test("receiptPath: otherwise it sits beside the video"):
-      val out = Output(Some(os.Path("/tmp/out/clip.mp4")), false, false, ReceiptTo.Derived)
-      assert(Main.receiptPath(out, job, Some("m")) == os.Path("/tmp/out/clip.mp4.receipt"))
+      val out = Output(DownloadTo.At(os.Path("/tmp/out/clip.mp4")), false, false, ReceiptTo.Derived)
+      assert(Main.receiptPath(out, Some(os.Path("/tmp/out/clip.mp4")), job, Some("m")) == os.Path("/tmp/out/clip.mp4.receipt"))
 
     test("receiptPath: with no download it is named for model and job"):
-      val out = Output(None, false, false, ReceiptTo.Derived)
-      val p = Main.receiptPath(out, job, Some("google/veo-3.1"))
+      val out = Output(DownloadTo.No, false, false, ReceiptTo.Derived)
+      val p = Main.receiptPath(out, None, job, Some("google/veo-3.1"))
       // A slash in a model id would otherwise read as a directory.
       assert(p.last.startsWith("google-veo-3.1-JOB123-") && p.ext == "receipt")
 
     test("receiptPath: an unknown model still yields a usable name"):
-      val out = Output(None, false, false, ReceiptTo.Derived)
-      assert(Main.receiptPath(out, job, None).last.startsWith("video-JOB123-"))
+      val out = Output(DownloadTo.No, false, false, ReceiptTo.Derived)
+      assert(Main.receiptPath(out, None, job, None).last.startsWith("video-JOB123-"))
 
     test("ReceiptTo.No writes nothing at all"):
       withTemp: dir =>
         val before = os.list(dir).size
-        val out = Output(Some(dir / "clip.mp4"), false, false, ReceiptTo.No)
+        val out = Output(DownloadTo.At(dir / "clip.mp4"), false, false, ReceiptTo.No)
         assert(run(Main.writeReceipt(out, job, None, Provenance())).isEmpty)
         assert(os.list(dir).size == before)
 
@@ -70,7 +70,7 @@ object ReceiptTests extends TestSuite:
         val video = dir / "deep" / "clip.mp4"       // a directory that does not exist yet
         os.makeDir.all(video / os.up)
         os.write(video, "pretend mp4".getBytes("UTF-8"))
-        val out = Output(Some(video), false, false, ReceiptTo.Derived)
+        val out = Output(DownloadTo.At(video), false, false, ReceiptTo.Derived)
         val (p, diverted) = run(Main.writeReceipt(out, job, Some(video), Provenance(Some(veo), Some("a duck")))).get
         assert(diverted.isEmpty)
         val text = os.read(p)
@@ -78,6 +78,29 @@ object ReceiptTests extends TestSuite:
         assert(text.contains("google/veo-3.1") && text.contains("Google: Veo 3.1"))
         assert(text.contains("SHA-256") && text.contains(run(Main.sha256(video))))
         assert(text.endsWith("Prompt:\na duck\n"))
+
+    test("an auto name is derived from the job and the media type"):
+      assert(Main.autoName(job, 0, 1, "mp4") == "video_JOB123.mp4")
+
+    test("and is numbered only when there is more than one output"):
+      assert(Main.autoName(job, 0, 3, "mp4") == "video_JOB123_0.mp4")
+      assert(Main.autoName(job, 2, 3, "mp4") == "video_JOB123_2.mp4")
+
+    test("an auto name sanitises the job id like any other"):
+      val odd = upickle.default.read[VideoJob]("""{"id":"a/b c","status":"completed"}""")
+      assert(Main.autoName(odd, 0, 1, "mp4") == "video_a-b-c.mp4")
+
+    test("the extension comes from the declared media type"):
+      def ext(ct: Option[String]) = Fetched(Array.emptyByteArray, ct).extension
+      assert(ext(Some("video/mp4")) == "mp4")
+      assert(ext(Some("video/mp4; charset=binary")) == "mp4")   // parameters ignored
+      assert(ext(Some("VIDEO/MP4")) == "mp4")                   // case-insensitive
+      assert(ext(Some("image/png")) == "png")
+
+    test("an unknown or absent type does not get a guessed extension"):
+      // `bin` is unhelpful, but it does not claim to be something it is not.
+      assert(Fetched(Array.emptyByteArray, Some("application/octet-stream")).extension == "bin")
+      assert(Fetched(Array.emptyByteArray, None).extension == "bin")
 
     test("annotated names carry the job id, keeping any extension"):
       assert(Main.annotated(os.Path("/a/clip.mp4"), "JOB123") == os.Path("/a/clip_JOB123.mp4"))
@@ -122,7 +145,7 @@ object ReceiptTests extends TestSuite:
         val video = dir / "clip.mp4"
         os.write(video, "pretend mp4")
         os.write(dir / "clip.mp4.receipt", "an older receipt, not to be lost")
-        val out = Output(Some(video), false, false, ReceiptTo.Derived)
+        val out = Output(DownloadTo.At(video), false, false, ReceiptTo.Derived)
         val (p, diverted) = run(Main.writeReceipt(out, job, Some(video), Provenance())).get
         assert(p == dir / "clip.mp4_JOB123.receipt")
         assert(diverted == Some(dir / "clip.mp4.receipt"))
@@ -134,13 +157,13 @@ object ReceiptTests extends TestSuite:
         os.write(video, "pretend mp4")
         os.write(dir / "clip.mp4.receipt", "first")
         os.write(dir / "clip.mp4_JOB123.receipt", "second")
-        val out = Output(Some(video), false, false, ReceiptTo.Derived)
+        val out = Output(DownloadTo.At(video), false, false, ReceiptTo.Derived)
         runEither(Main.writeReceipt(out, job, Some(video), Provenance())).left.toOption.get match
           case n: exception.NotSaved => assert(n.what == "the receipt" && n.url.isEmpty)
           case other                 => assert(false)
 
     test("a receipt with no download omits the digest"):
       withTemp: dir =>
-        val out = Output(None, false, false, ReceiptTo.Derived)
+        val out = Output(DownloadTo.No, false, false, ReceiptTo.Derived)
         val (p, _) = run(Main.writeReceipt(out, job, None, Provenance())).get
         try assert(!os.read(p).contains("SHA-256")) finally os.remove(p)
