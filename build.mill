@@ -42,10 +42,6 @@ object `package` extends ScalaModule, SonatypeCentralPublishModule:
     override def mvnDeps = Task:
       super.mvnDeps() ++ Seq( mvn"com.lihaoyi::utest:0.8.5" )
 
-  val MchangeStaging = "/Users/swaldman/development/gitproj/www.mchange.com/repository"
-
-  def publishMchange() = this.publishM2Local( MchangeStaging )
-
   object script extends DefaultTaskModule:
     def scriptSrc = Task.Source("orvdo.template")
     def script = Task:

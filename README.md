@@ -601,7 +601,6 @@ Mill, with the wrapper checked in — no global install needed:
 ./mill assembly                       # a self-executing jar
 ./mill script                         # a small launcher script
 ./mill publishLocal                   # into ~/.ivy2/local
-./mill publishMchange                 # into the mchange staging repository
 ```
 
 Tests are utest, and hermetic — no API key, no network:
@@ -651,7 +650,7 @@ jar.
 
 The trade-off is that the script only works where its dependency resolves. Once
 a version is published to Maven Central that is anywhere; until then, or for a
-version published only with `./mill publishLocal` or `./mill publishMchange`, it
+version published only with `./mill publishLocal`, it
 is a machine that has it locally. For a version that is not on Central, prefer
 the assembly jar, or add a `//> using repository` line to
 `script/orvdo.template` pointing at wherever you publish.
