@@ -135,8 +135,39 @@ Check out your new mp4 file, `video_20260902T170327Z_i3cl3HBsrhssEAMtNUks.mp4`:
 
 https://github.com/user-attachments/assets/9da1b1fb-3f00-4834-9453-06ac73afc2ba
 
+Please note that since we supplied no `--duration`, `--resolution`, `--aspect-ratio`,
+or preferences about audio, the script defaulted to the cheapest available options.
+Use `orvdo list-models` for information about what options would be available for each model.
+
+Also check out the `.mp4.receipt`. It's a text file that keeps a useful record of what you've done.
+
+### Go deeper
+
+Try
+
+```plaintext
+orvdo run --help
+```
+
+Or, for more control, check out...
+
+```plaintext
+orvdo --help
+```
+
+and 
+
+```plaintext
+orvdo submit --help
+```
+
+Or, just keep reading below!
+
 ## Build
 
+```plaintext
+orvdo submit --help
+```
 Mill, with the wrapper checked in — no global install needed:
 
 ```
