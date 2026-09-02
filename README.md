@@ -118,6 +118,21 @@ bytedance/seedance-2.0-mini  (ByteDance: Seedance 2.0 Mini)
 `audio` and `seed` report whether the model *accepts* those request fields, not
 what they cost — pricing is the `pricing` row's business.
 
+Most of the time you want one command:
+
+```
+./mill run run -m google/veo-3.1 -p "a duck wearing a tiny hat"
+```
+
+`run` submits, waits for the render, saves the video under a name derived from
+the job, and writes a receipt beside it — `submit --await --download --receipt`
+without the ceremony. It takes every generation option `submit` does
+(`--duration`, `--resolution`, `--aspect-ratio`, the audio flags, the image
+inputs, `--json`, `--param`), and none of the output-side ones, which it has
+already decided for you. Use `submit` when you want that control: to fire and
+forget without waiting, to name the file yourself, or to overwrite with
+`--force`.
+
 Submit and print the job record immediately:
 
 ```

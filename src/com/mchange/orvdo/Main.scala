@@ -1,6 +1,6 @@
 package com.mchange.orvdo
 
-import cats.data.Validated
+import cats.data.{Validated, ValidatedNel}
 import cats.syntax.all.*
 import com.monovore.decline.{Argument, Command, Opts}
 import exception.*
@@ -306,7 +306,22 @@ object Cli:
   /** Typed as `Opts[Cmd.Submit]` deliberately: if this were inlined into the
     * `Opts.subcommand[Cmd]` below, the expected type would push `Cmd` into the
     * `mapN` and `mapValidated` would only see the enum's common interface. */
-  private val submitOpts: Opts[Cmd.Submit] =
+  /** A value for something the caller is not being asked about. */
+  private def fixed[A](a: A): Opts[A] = Opts.unit.map(_ => a)
+
+  /** The generation options, shared by `submit` and `run`.
+    *
+    * Only the four output-side choices differ: `run` fixes them rather than
+    * offering them. Parameterising instead of duplicating means an option added
+    * to one is an option added to both, which is the whole reason `run` is
+    * worth having — it must stay `submit` with three flags pre-set, not a
+    * second command that drifts. */
+  private def submitLike(
+      awaitOpt: Opts[Boolean],
+      downloadOpt: Opts[DownloadTo],
+      forceOpt: Opts[Boolean],
+      receiptOpt: Opts[ReceiptTo]
+  ): Opts[Cmd.Submit] =
     (
       apiKey,
       Opts.option[String](
@@ -375,33 +390,56 @@ object Cli:
           "Style or subject reference image; repeatable. Guidance rather than an exact frame."
         )
         .orEmpty,
+      awaitOpt,
+      downloadOpt,
+      forceOpt,
+      json,
+      receiptOpt,
+      params
+    ).mapN(Cmd.Submit.apply)
+
+  private val submitOpts: Opts[Cmd.Submit] =
+    submitLike(
       await,
       downloadTo(
         "Save the finished videos, naming them for the job. Requires --await.",
         "Write the finished video to this path. Requires --await."
       ),
       force,
-      json,
-      receipt,
-      params
-    ).mapN(Cmd.Submit.apply)
+      receipt
+    )
+
+  /** `run` is `submit --await --download --receipt`, with those three not on
+    * offer. The overwhelmingly common invocation, minus the ceremony. */
+  private val runOpts: Opts[Cmd.Submit] =
+    submitLike(fixed(true), fixed(DownloadTo.Auto), fixed(false), fixed(ReceiptTo.Derived))
+
+  /** Shared by both subcommands. The last two conditions cannot fire for `run`,
+    * which fixes those flags, but checking them costs nothing and keeps one
+    * definition of what a valid submission is. */
+  private def validSubmission(s: Cmd.Submit): ValidatedNel[String, Cmd.Submit] =
+    if s.promptFile.isEmpty && s.prompt.isEmpty then
+      Validated.invalidNel("a prompt is required: give --prompt, --prompt-file, or both.")
+    else if s.download != DownloadTo.No && !s.await then
+      Validated.invalidNel(
+        "--download and --download-as require --await; there is no video to save until the job finishes."
+      )
+    else if s.force && s.download == DownloadTo.No then
+      Validated.invalidNel("--force only means something alongside --download or --download-as.")
+    else Validated.valid(s)
 
   private val submit: Opts[Cmd] =
     Opts.subcommand("submit", "Submit a text-to-video generation job.")(
-      submitOpts.mapValidated { s =>
-        if s.promptFile.isEmpty && s.prompt.isEmpty then
-          Validated.invalidNel(
-            "a prompt is required: give --prompt, --prompt-file, or both."
-          )
-        else if s.download != DownloadTo.No && !s.await then
-          Validated.invalidNel(
-            "--download and --download-as require --await; there is no video to save until the job finishes."
-          )
-        else if s.force && s.download == DownloadTo.No then
-          Validated.invalidNel("--force only means something alongside --download or --download-as.")
-        else Validated.valid(s)
-      }
+      submitOpts.mapValidated(validSubmission)
     )
+
+  private val run: Opts[Cmd] =
+    Opts.subcommand(
+      "run",
+      "Generate a video and wait for it: submit, poll to completion, save the " +
+        "result and write a receipt. `submit` with --await, --download and " +
+        "--receipt already set."
+    )(runOpts.mapValidated(validSubmission))
 
   val command: Command[Cmd] =
     Command(
@@ -411,7 +449,7 @@ object Cli:
           |
           |Generation is a job: `submit` returns immediately with a job id, `check`
           |reports the current state, and a completed job exposes a URL to download from.""".stripMargin
-    )(listModels.orElse(submit).orElse(check).orElse(download))
+    )(listModels.orElse(run).orElse(submit).orElse(check).orElse(download))
 
 object Main extends ZIOAppDefault:
 

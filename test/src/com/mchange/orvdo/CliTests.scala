@@ -158,6 +158,40 @@ object CliTests extends TestSuite:
       val e = errorOf("download", "-u", "https://openrouter.ai.evil.com/x", "--download-as", "o.mp4")
       assert(e.contains("refusing to send your API key"))
 
+    test("run is submit with three flags already set"):
+      val r = submitOf("run", "-m", "google/veo-3.1", "-p", "a duck")
+      assert(r.await)
+      assert(r.download == DownloadTo.Auto)
+      assert(r.receipt == ReceiptTo.Derived)
+      assert(!r.force)
+
+    test("run does not offer the flags it fixes"):
+      for flag <- Seq("--await", "--download", "--force", "--receipt") do
+        assert(parse("run", "-m", "m/x", "-p", "a duck", flag).isLeft)
+      for opt <- Seq("--download-as", "--receipt-as") do
+        assert(parse("run", "-m", "m/x", "-p", "a duck", opt, "o.mp4").isLeft)
+
+    test("run still requires a model and a prompt"):
+      assert(parse("run", "-p", "a duck").isLeft)
+      assert(errorOf("run", "-m", "m/x").contains("a prompt is required"))
+
+    test("run accepts every generation option submit does"):
+      val r = submitOf("run", "-m", "google/veo-3.1", "-p", "a duck",
+        "-d", "8", "-r", "1080p", "-a", "16:9", "--generate-audio",
+        "--first-frame", "https://x/a.png", "--last-frame", "https://x/z.png",
+        "--reference", "https://x/s.png", "--json", "-P", "k=1")
+      assert(r.duration == Some(8) && r.resolution == Some("1080p"))
+      assert(r.aspectRatio == Some("16:9") && r.generateAudio == Some(true))
+      assert(r.firstFrame.isDefined && r.lastFrame.isDefined && r.references.size == 1)
+      assert(r.json && r.params.size == 1)
+
+    test("run and submit agree, given equivalent arguments"):
+      // The point of sharing one option set: run must not drift from submit.
+      val viaRun = submitOf("run", "-m", "m/x", "-p", "a duck", "-d", "4")
+      val viaSubmit = submitOf("submit", "-m", "m/x", "-p", "a duck", "-d", "4",
+        "--await", "--download", "--receipt")
+      assert(viaRun == viaSubmit)
+
     test("an unknown subcommand is rejected"):
       assert(parse("nosuchthing").isLeft)
 
