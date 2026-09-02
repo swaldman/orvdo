@@ -1,0 +1,6 @@
+#!/usr/bin/env -S scala-cli shebang
+
+//> using scala "%SCALA_VERSION%"
+//> using dep "com.mchange::orvdo:%ORVDO_VERSION%"
+
+com.mchange.orvdo.Main.main(args)

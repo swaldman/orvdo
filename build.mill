@@ -45,4 +45,19 @@ object `package` extends ScalaModule, SonatypeCentralPublishModule:
   val MchangeStaging = "/Users/swaldman/development/gitproj/www.mchange.com/repository"
 
   def publishMchange() = this.publishM2Local( MchangeStaging )
-  
+
+  object script extends DefaultTaskModule:
+    def scriptSrc = Task.Source("orvdo.template")
+    def script = Task:
+      val libVersion = publishVersion()
+      val scalaVersion = build.scalaVersion();
+      val template = os.read(scriptSrc().path)
+      val script = template.replace("%SCALA_VERSION%",scalaVersion).replace("%ORVDO_VERSION%", libVersion)
+      val outPath = Task.dest / "orvdo"
+      os.write(outPath, script)
+      os.perms.set(outPath, "rwxr-xr-x")
+      Task.log.info(s"Script generated as $outPath") 
+      PathRef(outPath)
+
+    override def defaultTask() : String = "script"
+

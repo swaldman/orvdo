@@ -12,6 +12,7 @@ Mill, with the wrapper checked in — no global install needed:
 ./mill compile
 ./mill run <subcommand> [options]     # the CLI, from the build
 ./mill assembly                       # a self-executing jar
+./mill script                         # a small launcher script (see below)
 ./mill publishLocal                   # into ~/.ivy2/local
 ./mill publishMchange                 # into the mchange staging repository
 ```
@@ -32,6 +33,41 @@ out/assembly.dest/out.jar list-models -f veo
 ```
 
 The examples below are written as `./mill run …`; substitute the jar freely.
+
+## Installing
+
+`./mill assembly` produces a single self-contained jar, which needs only a JVM.
+Copy `out/assembly.dest/out.jar` somewhere on your `PATH` as `orvdo`.
+
+`./mill script` produces a smaller alternative: a launcher that resolves the
+library from a repository at run time rather than bundling it.
+
+```
+./mill script                 # writes out/script/script.dest/orvdo
+cp out/script/script.dest/orvdo ~/bin/orvdo
+```
+
+```
+#!/usr/bin/env -S scala-cli shebang
+
+//> using scala "3.3.8"
+//> using dep "com.mchange::orvdo:0.0.1-SNAPSHOT"
+
+com.mchange.orvdo.Main.main(args)
+```
+
+Both versions are filled in from the build, so the script cannot drift from what
+was published. It needs [scala-cli](https://scala-cli.virtuslab.org/) on your
+`PATH`; the first run resolves and caches the dependency, and later runs are
+quick. Exit codes and the stdout/stderr split behave exactly as they do with the
+jar.
+
+The trade-off is that the script only works where its dependency resolves.
+While the version is a `-SNAPSHOT`, that means a machine where you have run
+`./mill publishLocal` or `./mill publishMchange` — a snapshot is not on Maven
+Central. Until a release is published, prefer the assembly jar for anyone
+else's machine, or add a `//> using repository` line to
+`script/orvdo.template` pointing at wherever you publish.
 
 ## Setup
 
