@@ -197,16 +197,30 @@ object Render:
   /** One block per model, with everything you need to build a valid request.
     * `filter` is only used to explain an empty result: nothing matching the
     * text the user typed is a different situation from nothing being offered. */
-  def models(ms: List[VideoModel], filter: Option[String] = None): String =
+  /** The line that opens a model's block, and the whole of it under `--short`.
+    * Shared so the two listings cannot come to disagree about what a model is
+    * called. */
+  private def modelHeading(m: VideoModel): String =
+    m.name.filter(_ != m.id).fold(m.id)(n => s"${m.id}  ($n)")
+
+  def models(
+      ms: List[VideoModel],
+      filter: Option[String] = None,
+      short: Boolean = false
+  ): String =
     if ms.isEmpty then
       filter.fold("No video generation models available.")(f =>
         s"No video generation models match '$f'."
       )
+    else if short then
+      // Headings only, unseparated: the full listing runs to hundreds of lines,
+      // and reading it to discover what to filter on defeats the filter.
+      ms.sortBy(_.id).map(modelHeading).mkString("\n")
     else
       ms.sortBy(_.id)
         .map { m =>
           val out = List.newBuilder[String]
-          out += m.name.filter(_ != m.id).fold(m.id)(n => s"${m.id}  ($n)")
+          out += modelHeading(m)
 
           def list(label: String, values: Option[List[Any]], suffix: String = ""): Unit =
             values.filter(_.nonEmpty).foreach { vs =>

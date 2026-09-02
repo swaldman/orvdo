@@ -91,9 +91,23 @@ be set.
 ./mill run check --job-id abc123
 ```
 
-The full listing runs to a couple of dozen models, so `list-models` takes a
-`--filter` (`-f`) that keeps only those whose id or name contains the given
-text, case-insensitively:
+The full listing runs to a couple of dozen models and several hundred lines, so
+`--short` (`-s`) gives one line per model — the id and the name, nothing else:
+
+```
+./mill run list-models --short
+```
+
+```
+alibaba/wan-3.0  (Alibaba: Wan 3.0)
+black-forest-labs/flux-3-video  (Black Forest Labs: FLUX.3 Video)
+bytedance/seedance-2.0-mini  (ByteDance: Seedance 2.0 Mini)
+google/veo-3.1  (Google: Veo 3.1)
+```
+
+That is the usual way in: skim the catalog, then narrow. `--filter` (`-f`)
+keeps only models whose id or name contains the given text, case-insensitively,
+and combines with `--short`:
 
 ```
 ./mill run list-models -f veo        # google/veo-3.1, -fast, -lite

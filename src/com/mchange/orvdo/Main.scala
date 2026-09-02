@@ -63,7 +63,7 @@ final case class Provenance(
 )
 
 enum Cmd:
-  case ListModels(apiKey: Option[String], filter: Option[String])
+  case ListModels(apiKey: Option[String], filter: Option[String], short: Boolean)
   case Check(
       apiKey: String,
       jobId: String,
@@ -285,7 +285,10 @@ object Cli:
             short = "f",
             metavar = "text"
           )
-          .orNone
+          .orNone,
+        Opts
+          .flag("short", "One line per model: just the id and the name.", short = "s")
+          .orFalse
       ).mapN(Cmd.ListModels.apply)
     )
 
@@ -466,10 +469,10 @@ object Main extends ZIOAppDefault:
 
   private def runCmd(cmd: Cmd): Task[Unit] = cmd match
 
-    case Cmd.ListModels(key, filter) =>
+    case Cmd.ListModels(key, filter, short) =>
       loadCatalog(key)
         .map(ms => filter.fold(ms)(f => ms.filter(_.matches(f))))
-        .flatMap(ms => Console.printLine(Render.models(ms, filter)))
+        .flatMap(ms => Console.printLine(Render.models(ms, filter, short)))
 
     case d: Cmd.Download =>
       // The same no-clobber policy as a job download, so the two behave alike.

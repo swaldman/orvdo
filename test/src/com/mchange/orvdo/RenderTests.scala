@@ -144,6 +144,29 @@ object RenderTests extends TestSuite:
       assert(r.indexOf("SHA-256") < r.indexOf("Request:"))
       assert(r.indexOf("Request:") < r.indexOf("Prompt:"))
 
+    test("--short is one line per model, and no blank lines"):
+      val out = Render.models(List(veo, gen45, aleph), None, short = true)
+      val lines = out.linesIterator.toList
+      assert(lines.size == 3)
+      assert(lines.forall(_.nonEmpty))
+
+    test("--short keeps the same heading as the full listing"):
+      // The two must not come to disagree about what a model is called.
+      val full = Render.models(List(veo), None).linesIterator.next()
+      val short = Render.models(List(veo), None, short = true)
+      assert(short == full)
+
+    test("--short omits everything else"):
+      val out = Render.models(List(veo), None, short = true)
+      assert(!out.contains("durations") && !out.contains("pricing") && !out.contains("about"))
+
+    test("--short sorts by id, like the full listing"):
+      val out = Render.models(List(gen45, aleph, veo), None, short = true)
+      assert(out.linesIterator.toList == out.linesIterator.toList.sorted)
+
+    test("--short still explains an empty result"):
+      assert(Render.models(Nil, Some("zzz"), short = true).contains("match 'zzz'"))
+
     test("list-models distinguishes empty from filtered-to-empty"):
       assert(Render.models(Nil, None).contains("No video generation models available"))
       assert(Render.models(Nil, Some("zzz")).contains("match 'zzz'"))

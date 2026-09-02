@@ -37,12 +37,12 @@ object CliTests extends TestSuite:
       // Verified against the API: 200 with no Authorization header at all, and
       // byte-identical content to an authenticated request.
       Cli.command.parse(Seq("list-models"), Map.empty) match
-        case Right(Cmd.ListModels(key, _)) => assert(key.isEmpty)
+        case Right(Cmd.ListModels(key, _, _)) => assert(key.isEmpty)
         case other                         => assert(false)
 
     test("but list-models still sends a key when one is set"):
       Cli.command.parse(Seq("list-models"), Env) match
-        case Right(Cmd.ListModels(key, _)) => assert(key.contains("sk-or-test"))
+        case Right(Cmd.ListModels(key, _, _)) => assert(key.contains("sk-or-test"))
         case other                         => assert(false)
 
     test("every other subcommand still requires a key"):
@@ -219,7 +219,23 @@ object CliTests extends TestSuite:
     test("--help is not an error"):
       assert(parse("--help").left.toOption.get.errors.isEmpty)
 
+    test("list-models --short, long and short spellings"):
+      for spelling <- Seq("--short", "-s") do
+        parse("list-models", spelling) match
+          case Right(Cmd.ListModels(_, _, short)) => assert(short)
+          case other                              => assert(false)
+
+    test("list-models is long by default"):
+      parse("list-models") match
+        case Right(Cmd.ListModels(_, _, short)) => assert(!short)
+        case other                              => assert(false)
+
+    test("--short combines with --filter"):
+      parse("list-models", "-f", "veo", "-s") match
+        case Right(Cmd.ListModels(_, f, short)) => assert(f == Some("veo") && short)
+        case other                              => assert(false)
+
     test("list-models --filter"):
       assert(parse("list-models", "-f", "veo") match
-        case Right(Cmd.ListModels(_, f)) => f == Some("veo")
+        case Right(Cmd.ListModels(_, f, _)) => f == Some("veo")
         case _                           => false)
