@@ -16,7 +16,7 @@ You really should.
 
 Download the `orvdo` script.
 
-You'll find it as a downloadable binary in the [latest release](https://github.com/swaldman/orvdo/releases/latest).
+You'll find it as a downloadable asset in the [latest release](https://github.com/swaldman/orvdo/releases/latest).
 Make sure that it's executable:
 
 ```plaintext
