@@ -81,7 +81,10 @@ bytedance/seedance-2.0-mini  (ByteDance: Seedance 2.0 Mini)
   seed        yes
   pricing     video_tokens=0.0000035, video_tokens_with_video_input=0.0000021, video_tokens_without_audio=0.0000035
   passthrough watermark, req_key, return_last_frame
-  about       Seedance 2.0 Mini is a video generation model from ByteDance. It supports text-to-video, image-to-video with first and last frame control, and multimodal ref...
+  about       Seedance 2.0 Mini is a video generation model from ByteDance. It
+              supports text-to-video, image-to-video with first and last frame
+              control, and multimodal reference-to-video with image, video and
+              audio inputs...
 ```
 
 For more on the `list-models` subcommand, see the help:

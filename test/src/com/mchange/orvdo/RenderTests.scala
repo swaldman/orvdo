@@ -144,6 +144,32 @@ object RenderTests extends TestSuite:
       assert(r.indexOf("SHA-256") < r.indexOf("Request:"))
       assert(r.indexOf("Request:") < r.indexOf("Prompt:"))
 
+    test("a long description wraps rather than being cut off"):
+      val wordy = upickle.default.read[VideoModel](
+        s"""{"id":"m/x","description":"${List.fill(60)("alpha").mkString(" ")}"}""")
+      val out = Render.models(List(wordy), None)
+      assert(!out.contains("..."))
+      assert("alpha".r.findAllIn(out).size == 60)   // every word survives
+
+    test("wrapped lines align under the value column, and fit the width"):
+      val wordy = upickle.default.read[VideoModel](
+        s"""{"id":"m/x","description":"${List.fill(60)("alpha").mkString(" ")}"}""")
+      val lines = Render.models(List(wordy), None).linesIterator.toList
+      val about = lines.dropWhile(!_.contains("about"))
+      assert(about.tail.forall(_.startsWith(" " * 14)))
+      assert(about.forall(_.length <= 80))
+
+    test("a short description stays on one line"):
+      val brief = upickle.default.read[VideoModel]("""{"id":"m/x","description":"A small model."}""")
+      val about = Render.models(List(brief), None).linesIterator.filter(_.contains("about")).toList
+      assert(about == List("  about       A small model."))
+
+    test("an over-long word is left whole rather than broken"):
+      // Breaking a URL across lines would be worse than a long line.
+      val url = "https://example.com/" + "x" * 90
+      val m = upickle.default.read[VideoModel](s"""{"id":"m/x","description":"see $url now"}""")
+      assert(Render.models(List(m), None).contains(url))
+
     test("--short is one line per model, and no blank lines"):
       val out = Render.models(List(veo, gen45, aleph), None, short = true)
       val lines = out.linesIterator.toList

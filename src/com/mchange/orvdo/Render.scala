@@ -6,6 +6,10 @@ object Render:
 
   private val LabelWidth = 12
 
+  /** Total line width for wrapped prose. Fixed rather than read from the
+    * terminal, so output is the same piped as it is on screen. */
+  private val WrapWidth = 80
+
   private def row(label: String, value: String): String =
     // A label at or past the column width still needs a separator, or a long
     // passthrough key runs straight into its value.
@@ -20,6 +24,19 @@ object Render:
     case other          => scalar(other)
 
   private def yesNo(b: Boolean): String = if b then "yes" else "no"
+
+  /** Greedy word wrap. A word longer than the width is left whole and allowed
+    * to overrun: breaking a URL across lines is worse than a long line. */
+  private def wrap(text: String, width: Int): List[String] =
+    text
+      .split("\\s+")
+      .filter(_.nonEmpty)
+      .foldLeft(List.empty[String]) { (lines, word) =>
+        lines match
+          case head :: rest if head.length + 1 + word.length <= width => s"$head $word" :: rest
+          case _                                                     => word :: lines
+      }
+      .reverse
 
   private def date(epochSeconds: Long): String =
     Instant.ofEpochSecond(epochSeconds).atZone(ZoneOffset.UTC).toLocalDate.toString
@@ -253,10 +270,17 @@ object Render:
 
           list("passthrough", m.allowed_passthrough_parameters)
 
+          // Wrapped rather than elided: the descriptions carry things a reader
+          // wants, and OpenRouter has already abridged them at its end — 26 of
+          // 28 arrive ending in an ellipsis — so cutting them again lost real
+          // text. Continuation lines align under the value column.
           m.description.map(_.trim).filter(_.nonEmpty).foreach { d =>
-            val oneLine = d.replaceAll("\\s+", " ")
-            val clipped = if oneLine.length > 160 then oneLine.take(157) + "..." else oneLine
-            out += "  " + row("about", clipped)
+            val indent = " " * (LabelWidth + 2)
+            wrap(d, WrapWidth - LabelWidth - 2) match
+              case Nil => ()
+              case first :: rest =>
+                out += "  " + row("about", first)
+                rest.foreach(line => out += indent + line)
           }
 
           out.result().mkString("\n")
